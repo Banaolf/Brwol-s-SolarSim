@@ -7,7 +7,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 12; // Increased for better orbit stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.7.4";
+const VERSION = "B.0.7.5";
 
 const KEYS = {
     SPAWN: '1',
