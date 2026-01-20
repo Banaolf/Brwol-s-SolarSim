@@ -1,0 +1,114 @@
+body { 
+    margin: 0; 
+    overflow: hidden; 
+    background: #000; 
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#ui { 
+    position: absolute; 
+    top: 20px; 
+    left: 20px; 
+    color: white; 
+    pointer-events: none; /* Allows clicking through the text to the 3D scene */
+}
+
+#planet-ui { 
+    display: none; 
+    position: absolute; 
+    top: 20px; 
+    right: 20px; 
+    background: rgba(20, 20, 20, 0.9); 
+    color: white; 
+    padding: 20px; 
+    border-radius: 12px; 
+    border: 1px solid #444;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    min-width: 150px;
+}
+
+.control-group {
+    margin: 15px 0;
+}
+
+button {
+    width: 100%;
+    padding: 8px;
+    background: #444;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #666;
+}
+
+/* Floating Planet Labels */
+.planet-label {
+    position: absolute;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    pointer-events: none; /* Let clicks pass through to the planet */
+    text-shadow: 1px 1px 2px black;
+    transform: translate(-50%, -50%);
+    white-space: nowrap;
+}
+
+/* Update the UI panel width slightly */
+#planet-ui {
+    min-width: 200px;
+}
+
+/* Configuration Tab */
+#config-ui {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(15, 15, 15, 0.95);
+    color: #0f0;
+    padding: 25px;
+    border: 1px solid #444;
+    border-radius: 8px;
+    box-shadow: 0 0 40px rgba(0,0,0,0.8);
+    font-family: 'Courier New', Courier, monospace;
+    z-index: 2000;
+    min-width: 300px;
+}
+
+.config-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 12px 0;
+    align-items: center;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+}
+
+/* Tabs */
+.tab-header { display: flex; border-bottom: 1px solid #444; margin-bottom: 15px; }
+.tab-btn { background: transparent; border: none; color: #888; padding: 10px; cursor: pointer; flex: 1; }
+.tab-btn.active { color: #0f0; border-bottom: 2px solid #0f0; background: rgba(0,255,0,0.1); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Placement UI */
+#placement-ui {
+    display: none;
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(20, 20, 20, 0.9);
+    padding: 15px;
+    border: 1px solid #444;
+    border-radius: 8px;
+    width: 140px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+}
+#placement-ui h3 { margin-top: 0; color: #0f0; font-size: 14px; text-align: center; }
+#placement-ui button { margin-bottom: 8px; font-size: 12px; }

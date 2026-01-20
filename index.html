@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Simulator - B.0.7.3</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body, button, input {
+            font-family: "OCR A Std", "OCR-A", monospace;
+            text-transform: uppercase;
+        }
+        #version-tag {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            color: rgba(0, 242, 255, 0.5);
+            font-size: 10px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>SYS_TERMINAL</h1>
+        <div style="background: rgba(0,10,20,0.8); padding: 10px; border: 1px solid #00f2ff;">
+            <p id="timeLabel">WARP_FACTOR: 20X</p>
+            <p style="font-size: 0.7em; opacity: 0.7;">CTRL+1: SPAWN | CTRL +/-: WARP</p>
+        </div>
+    </div>
+
+    <div id="labels-container"></div>
+    <div id="version-tag">VERSION: B.0.7.0</div>
+
+    <div id="planet-ui" style="display:none;">
+        <h3>PROPERTIES</h3>
+        <div class="control-group">
+            <label>ID:</label>
+            <input type="text" id="planetNameDisplay" autocomplete="off">
+        </div>
+        <div id="planet-only-stats">
+            <div class="control-group">
+                <label>VEL_MAG:</label>
+                <input type="number" id="speedDisplay" step="0.1">
+            </div>
+        </div>
+        <div class="control-group">
+            <label>COLOR:</label>
+            <input type="color" id="colorPicker">
+        </div>
+        <button id="close-ui">DISCONNECT</button>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+    <script type="module" src="script.js"></script>
+</body>
+</html>
