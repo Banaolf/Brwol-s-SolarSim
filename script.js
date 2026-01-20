@@ -304,7 +304,7 @@ function createPlanet(typeOverride = null) {
     scene.add(orbitLine);
 
     const pData = {
-        name: `${type}_${nameBank[Math.floor(Math.random() * nameBank.length)].toUpperCase()}`,
+        name: `${nameBank[Math.floor(Math.random() * nameBank.length)].toUpperCase()}`,
         pos, vel, orbitLine, type, size,
         mesh: new THREE.Mesh(new THREE.SphereGeometry(size, 32, 32), new THREE.MeshStandardMaterial({ color: color, roughness: 0.7 })),
         label: null
