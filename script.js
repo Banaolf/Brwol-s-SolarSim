@@ -4,10 +4,10 @@ import * as THREE from 'three';
 let G = 500; 
 let SUN_MASS = 1000;
 let MAX_PLANETS = 12;
-const SUB_STEPS = 12; // Increased for better orbit stability
+const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.7.6";
+const VERSION = "B.0.7.7";
 
 const KEYS = {
     SPAWN: '1',
@@ -19,13 +19,14 @@ const KEYS = {
     CHANGELOG: 'c'
 };
 
-const timeSteps = [1, 2, 5, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200];
-let currentTimeStepIndex = 4; 
+const timeSteps = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, 43200, 86400];
+let currentTimeStepIndex = 4; // Starts at 60 (1 MIN/S)
 let timeMultiplier = timeSteps[currentTimeStepIndex];
 
 const nameBank = ["Aether", "Alcor", "Amalthea", "Ananke", "Anthe", "Ariel", "Atlas", "Belinda", "Bianca", "Callisto", "Calypso", "Carme", "Ceres", "Charon", "Cordelia", "Cressida", "Cybele", "Daphnis", "Deimos", "Despina", "Dione", "Eris", "Elara", "Enceladus", "Epimetheus", "Erinome", "Euanthe", "Eukelade", "Europa", "Eurydome", "Fenrir", "Fornjot", "Galatea", "Ganymede", "Greip", "Harpalyke", "Haumea", "Helene", "Himalia", "Hyperion", "Iapetus", "Iocaste", "Io", "Ison", "Janus", "Juliet", "Kale", "Kalyke", "Kiviuq", "Larissa", "Leda", "Lysithea", "Makemake", "Metis", "Mimas", "Mira", "Miranda", "Naiad", "Narvi", "Nereid", "Oberon", "Ophelia", "Orthosie", "Pandora", "Pasiphae", "Pax", "Phobos", "Phoebe", "Portia", "Prometheus", "Proteus", "Puck", "Rhea", "Sinope", "Styx", "Tarvos", "Telesto", "Tethys", "Thalassa", "Thebe", "Titan"];
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.7.7", notes: ["Physics stability overhaul (100 sub-steps)", "Real-time Velocity & Apsides data", "Modular Camera System", "Futuristic UI Polish", "Time Warp units (Min/s, Hr/s)"] },
     { ver: "B.0.7.6", notes: ["Optimized physics engine (Reduced GC)", "Added Changelog (Press C). We are aware that moving down moves the camera, too.", "Code cleanup"] },
     { ver: "B.0.7.5", notes: ["Grid Helper added", "Grid configuration options"] },
     { ver: "B.0.7.4", notes: ["Grid System implementation"] },
@@ -188,6 +189,18 @@ function initUI() {
     extraStatsContainer.style.fontSize = '0.9em';
     extraStatsContainer.style.color = '#aaa';
     uiPanel.insertBefore(extraStatsContainer, document.getElementById('planet-only-stats'));
+
+    // Polish Speed Input UI
+    const speedContainer = document.getElementById('planet-only-stats');
+    if (speedContainer) {
+        // Inject structure for "VELOCITY [input] m/s"
+        const lbl = speedContainer.querySelector('label');
+        if(lbl) lbl.textContent = "VELOCITY";
+        speedInput.style.width = "70px";
+        speedInput.style.textAlign = "right";
+        speedInput.insertAdjacentHTML('afterend', '<span style="color:#00f2ff; font-size:0.8em; margin-left:5px;">m/s</span>');
+        speedContainer.insertAdjacentHTML('beforeend', '<div id="apsides-info" style="margin-top:8px; font-size:0.8em; color:#888;"></div>');
+    }
 }
 initUI();
 
@@ -203,7 +216,15 @@ function createLabel(text) {
 function updateTimeUI() {
     timeMultiplier = timeSteps[currentTimeStepIndex];
     const label = document.getElementById('timeLabel');
-    if(label) label.textContent = `WARP_FACTOR: ${timeMultiplier}X`;
+    if(label) {
+        let text = `${timeMultiplier} X`;
+        if (timeMultiplier >= 86400) text = `${(timeMultiplier/86400).toFixed(1)} DAY/S`;
+        else if (timeMultiplier >= 3600) text = `${(timeMultiplier/3600).toFixed(1)} HR/S`;
+        else if (timeMultiplier >= 60) text = `${(timeMultiplier/60).toFixed(0)} MIN/S`;
+        else text = `${timeMultiplier} SEC/S`;
+        
+        label.textContent = `WARP: ${text}`;
+    }
 }
 
 function deleteOutermostPlanet() {
@@ -242,6 +263,7 @@ function updateOrbitLine(p) {
     const h = new THREE.Vector3().crossVectors(rVec, vVec); // Angular momentum
     const eVec = new THREE.Vector3().crossVectors(vVec, h).divideScalar(mu).sub(rVec.clone().normalize()); // Eccentricity vector
     const e = eVec.length();
+    let apsidesInfo = { tPe: 0, tAp: 0, period: 0 };
     
     const points = [];
 
@@ -250,9 +272,23 @@ function updateOrbitLine(p) {
         const specificEnergy = vVec.lengthSq() / 2 - mu / rVec.length();
         const a = -mu / (2 * specificEnergy); // Semi-major axis
         const p_param = a * (1 - e * e); // Semi-latus rectum
+        const period = 2 * Math.PI * Math.sqrt(Math.pow(a, 3) / mu);
+
+        // Time to Apsides Calculation
+        const r = rVec.length();
+        const dot = rVec.dot(vVec);
+        const nu = Math.acos(Math.max(-1, Math.min(1, eVec.dot(rVec) / (e * r))));
+        const trueAnomaly = (dot >= 0) ? nu : (2 * Math.PI - nu);
+        
+        const E = 2 * Math.atan(Math.sqrt((1-e)/(1+e)) * Math.tan(trueAnomaly/2));
+        const M = E - e * Math.sin(E); // Mean Anomaly
+        const n = Math.sqrt(mu / Math.pow(a, 3)); // Mean Motion
+        const tSincePe = M / n;
+        
+        apsidesInfo = { tPe: period - tSincePe, tAp: (period * 1.5 - tSincePe) % period, period: period };
         
         // Basis Vectors
-        const n = new THREE.Vector3().copy(h).normalize(); // Orbit Normal
+        const num = new THREE.Vector3().copy(h).normalize(); // Orbit Normal
         let u = new THREE.Vector3(); // Periapsis direction
         if (e > 0.01) {
             u.copy(eVec).normalize();
@@ -293,6 +329,7 @@ function updateOrbitLine(p) {
     
     p.orbitLine.geometry.dispose();
     p.orbitLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
+    p.orbitalData = apsidesInfo;
 }
 
 function createPlanet(typeOverride = null) {
@@ -342,11 +379,25 @@ function createPlanet(typeOverride = null) {
 }
 
 // --- CONTROLS ---
-let theta = Math.PI/4, phi = Math.PI/4, radius = 1000, isRightClick = false;
+const CameraManager = {
+    theta: Math.PI/4,
+    phi: Math.PI/4,
+    radius: 1000,
+    isRightClick: false,
+    
+    update: function() {
+        camera.position.set(
+            this.radius * Math.sin(this.phi) * Math.cos(this.theta),
+            this.radius * Math.cos(this.phi),
+            this.radius * Math.sin(this.phi) * Math.sin(this.theta)
+        );
+        camera.lookAt(0, 0, 0);
+    }
+};
 
 // ZOOM FEATURE
 window.addEventListener('wheel', (e) => {
-    radius = Math.max(100, Math.min(6000, radius + e.deltaY * 0.5));
+    CameraManager.radius = Math.max(100, Math.min(6000, CameraManager.radius + e.deltaY * 0.5));
 });
 
 window.addEventListener('keydown', (e) => {
@@ -376,7 +427,7 @@ window.addEventListener('keydown', (e) => {
 
 // Selection & Mouse
 window.addEventListener('mousedown', (e) => {
-    if (e.button === 2) isRightClick = true;
+    if (e.button === 2) CameraManager.isRightClick = true;
     if (e.target.closest('#ui') || e.target.closest('#planet-ui')) return;
     
     const mouse = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
@@ -401,12 +452,12 @@ window.addEventListener('mousedown', (e) => {
     }
 });
 
-window.addEventListener('mouseup', () => isRightClick = false);
+window.addEventListener('mouseup', () => CameraManager.isRightClick = false);
 window.addEventListener('contextmenu', e => e.preventDefault());
 window.addEventListener('mousemove', e => {
-    if(isRightClick) {
-        theta -= e.movementX * 0.005;
-        phi = Math.max(0.1, Math.min(Math.PI/2 - 0.1, phi + e.movementY * 0.005));
+    if(CameraManager.isRightClick) {
+        CameraManager.theta -= e.movementX * 0.005;
+        CameraManager.phi = Math.max(0.1, Math.min(Math.PI/2 - 0.1, CameraManager.phi + e.movementY * 0.005));
     }
 });
 
@@ -461,12 +512,22 @@ function animate() {
             RADIUS: ${selected.size.toFixed(1)}<br>
             DIST: ${dist} AU
         `;
+        
+        // Update Velocity Input (Real-time)
+        if (document.activeElement !== speedInput) {
+            speedInput.value = selected.vel.length().toFixed(2);
+        }
+
+        // Update Apsides Info
+        const apsDiv = document.getElementById('apsides-info');
+        if (apsDiv && selected.orbitalData) {
+            apsDiv.innerHTML = `T-PE: ${selected.orbitalData.tPe.toFixed(0)}s<br>T-AP: ${selected.orbitalData.tAp.toFixed(0)}s`;
+        }
     } else {
         extraStatsContainer.innerHTML = "";
     }
 
-    camera.position.set(radius * Math.sin(phi) * Math.cos(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
-    camera.lookAt(0, 0, 0);
+    CameraManager.update();
 
     const sunV = new THREE.Vector3(0,0,0).project(camera);
     sunLabel.style.left = `${(sunV.x * 0.5 + 0.5) * window.innerWidth}px`;
