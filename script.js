@@ -7,7 +7,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 12; // Increased for better orbit stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.7.5";
+const VERSION = "B.0.7.6";
 
 const KEYS = {
     SPAWN: '1',
@@ -15,7 +15,8 @@ const KEYS = {
     TIME_DOWN: '-',
     CONFIG: 'o',
     PLACEMENT: 'p',
-    DELETE: 'Delete'
+    DELETE: 'Delete',
+    CHANGELOG: 'c'
 };
 
 const timeSteps = [1, 2, 5, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200];
@@ -23,6 +24,16 @@ let currentTimeStepIndex = 4;
 let timeMultiplier = timeSteps[currentTimeStepIndex];
 
 const nameBank = ["Aether", "Alcor", "Amalthea", "Ananke", "Anthe", "Ariel", "Atlas", "Belinda", "Bianca", "Callisto", "Calypso", "Carme", "Ceres", "Charon", "Cordelia", "Cressida", "Cybele", "Daphnis", "Deimos", "Despina", "Dione", "Eris", "Elara", "Enceladus", "Epimetheus", "Erinome", "Euanthe", "Eukelade", "Europa", "Eurydome", "Fenrir", "Fornjot", "Galatea", "Ganymede", "Greip", "Harpalyke", "Haumea", "Helene", "Himalia", "Hyperion", "Iapetus", "Iocaste", "Io", "Ison", "Janus", "Juliet", "Kale", "Kalyke", "Kiviuq", "Larissa", "Leda", "Lysithea", "Makemake", "Metis", "Mimas", "Mira", "Miranda", "Naiad", "Narvi", "Nereid", "Oberon", "Ophelia", "Orthosie", "Pandora", "Pasiphae", "Pax", "Phobos", "Phoebe", "Portia", "Prometheus", "Proteus", "Puck", "Rhea", "Sinope", "Styx", "Tarvos", "Telesto", "Tethys", "Thalassa", "Thebe", "Titan"];
+
+const CHANGELOG_DATA = [
+    { ver: "B.0.7.6", notes: ["Optimized physics engine (Reduced GC)", "Added Changelog (Press C)", "Code cleanup"] },
+    { ver: "B.0.7.5", notes: ["Grid Helper added", "Grid configuration options"] },
+    { ver: "B.0.7.4", notes: ["Grid System implementation"] },
+    { ver: "B.0.7.3", notes: ["Input focus fix for shortcuts"] },
+    { ver: "B.0.7.2", notes: ["Analytical Orbit Solver (Keplerian)", "Delete Outermost Planet (Ctrl+Del)"] },
+    { ver: "B.0.7.1", notes: ["Placement Menu (P)", "Keybinds Tab"] },
+    { ver: "B.0.7.0", notes: ["Configuration Tab (O)", "White Orbits", "Data Link Stats"] }
+];
 
 let planets = [];
 let selected = null;
@@ -65,6 +76,7 @@ function initUI() {
     hint.className = 'key-hint';
     hint.innerHTML = '<br>[O] CONFIGURATION TAB';
     hint.innerHTML += '<br>[P] PLACEMENT MENU';
+    hint.innerHTML += '<br>[C] CHANGELOG';
     ui.appendChild(hint);
 
     // Create Config Modal
@@ -109,6 +121,19 @@ function initUI() {
         <button id="spawn-gas">GAS GIANT</button>
     `;
     document.body.appendChild(placeDiv);
+
+    // Create Changelog UI
+    const logDiv = document.createElement('div');
+    logDiv.id = 'changelog-ui';
+    logDiv.innerHTML = `<h2 style="text-align:center; margin-top:0; color:white;">SYSTEM_LOG</h2>`;
+    CHANGELOG_DATA.forEach(log => {
+        logDiv.innerHTML += `
+            <div class="log-entry">
+                <div class="log-ver">VERSION ${log.ver}</div>
+                <ul class="log-list">${log.notes.map(n => `<li>${n}</li>`).join('')}</ul>
+            </div>`;
+    });
+    document.body.appendChild(logDiv);
 
     // --- EVENT LISTENERS FOR UI ---
     
@@ -253,14 +278,13 @@ function updateOrbitLine(p) {
         const simStep = 1; 
         
         for (let i = 0; i < 300; i++) {
-            const diff = tempPos.clone().negate();
-            const r2 = diff.lengthSq();
+            const r2 = tempPos.lengthSq();
             if (r2 < CRASH_DISTANCE * CRASH_DISTANCE) break;
             
             const dist = Math.sqrt(r2);
-            const acc = diff.multiplyScalar(mu / (r2 * dist));
+            const accFactor = -mu / (r2 * dist);
             
-            tempVel.addScaledVector(acc, simStep);
+            tempVel.addScaledVector(tempPos, accFactor * simStep);
             tempPos.addScaledVector(tempVel, simStep);
             points.push(tempPos.clone());
             if (tempPos.length() > DESPAWN_DISTANCE) break;
@@ -338,6 +362,11 @@ window.addEventListener('keydown', (e) => {
         pl.style.display = (pl.style.display === 'none' || pl.style.display === '') ? 'block' : 'none';
     }
 
+    if (e.key.toLowerCase() === KEYS.CHANGELOG.toLowerCase()) {
+        const cl = document.getElementById('changelog-ui');
+        cl.style.display = (cl.style.display === 'none' || cl.style.display === '') ? 'block' : 'none';
+    }
+
     if (!e.ctrlKey) return;
     if (e.key === KEYS.SPAWN) { e.preventDefault(); createPlanet(); }
     if (e.key === KEYS.DELETE) { e.preventDefault(); deleteOutermostPlanet(); }
@@ -404,8 +433,8 @@ function animate() {
     for (let s = 0; s < SUB_STEPS; s++) {
         for (let i = planets.length - 1; i >= 0; i--) {
             const p = planets[i];
-            const diff = new THREE.Vector3(0,0,0).sub(p.pos);
-            const r = diff.length();
+            const rSq = p.pos.lengthSq();
+            const r = Math.sqrt(rSq);
 
             if (r < CRASH_DISTANCE) {
                 console.log(`%cCRASH: ${p.name}`, "color: #ff0000");
@@ -418,9 +447,9 @@ function animate() {
                 planets.splice(i, 1); continue;
             }
 
-            const acc = diff.normalize().multiplyScalar((G * SUN_MASS) / (r * r));
-            p.vel.add(acc.multiplyScalar(subDt));
-            p.pos.add(p.vel.clone().multiplyScalar(subDt));
+            const accFactor = -(G * SUN_MASS) / (rSq * r);
+            p.vel.addScaledVector(p.pos, accFactor * subDt);
+            p.pos.addScaledVector(p.vel, subDt);
         }
     }
 
