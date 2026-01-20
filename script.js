@@ -7,7 +7,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 12; // Increased for better orbit stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "AB.0.7.3";
+const VERSION = "B.0.7.4";
 
 const KEYS = {
     SPAWN: '1',
@@ -51,6 +51,12 @@ const sunLabel = createLabel("THE_SUN");
 sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun };
 scene.add(sun);
 
+// --- GRID HELPER ---
+const gridHelper = new THREE.GridHelper(10000, 50, 0xffffff, 0xffffff);
+gridHelper.material.transparent = true;
+gridHelper.material.opacity = 0.15;
+scene.add(gridHelper);
+
 // --- UI INITIALIZATION ---
 function initUI() {
     // Add Config Hint to Main UI
@@ -75,6 +81,8 @@ function initUI() {
             <div class="config-row"><span>SUN_MASS</span><input type="number" id="cfg-mass" value="${SUN_MASS}"></div>
             <div class="config-row"><span>MAX_PLANETS</span><input type="number" id="cfg-max" value="${MAX_PLANETS}"></div>
             <div class="config-row"><span>DESPAWN_DIST</span><input type="number" id="cfg-despawn" value="${DESPAWN_DISTANCE}"></div>
+            <div class="config-row"><span>SHOW_GRID</span><input type="checkbox" id="cfg-grid-show" checked></div>
+            <div class="config-row"><span>GRID_COLOR</span><input type="color" id="cfg-grid-col" value="#ffffff"></div>
         </div>
 
         <div id="tab-keybinds" class="tab-content">
@@ -128,6 +136,8 @@ function initUI() {
         SUN_MASS = parseFloat(document.getElementById('cfg-mass').value);
         MAX_PLANETS = parseInt(document.getElementById('cfg-max').value);
         DESPAWN_DISTANCE = parseFloat(document.getElementById('cfg-despawn').value);
+        gridHelper.visible = document.getElementById('cfg-grid-show').checked;
+        gridHelper.material.color.set(document.getElementById('cfg-grid-col').value);
         document.getElementById('config-ui').style.display = 'none';
     };
 
