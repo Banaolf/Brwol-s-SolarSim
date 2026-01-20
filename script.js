@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 
 // --- CONFIG & CONSTANTS ---
+const AU_SIZE = 200; // 1 Grid Square = 1 AU
 let G = 500; 
 let SUN_MASS = 1000;
 let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.7.7-hotfix";
+const VERSION = "B.0.7.8";
 
 const KEYS = {
     SPAWN: '1',
@@ -19,13 +20,14 @@ const KEYS = {
     CHANGELOG: 'c'
 };
 
-const timeSteps = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, 43200, 86400];
-let currentTimeStepIndex = 4; // Starts at 60 (1 MIN/S)
-let timeMultiplier = timeSteps[currentTimeStepIndex];
+const timeSteps = [1920, 3600, 14400, 43200, 86400, 259200, 604800, 1209600, 2592000, 7776000, 15552000, 31536000];
+let currentTimeStepIndex = 4; // Starts at 1 Day/s
+let timeMultiplier = 1; // Will be calculated dynamically
 
 const nameBank = ["Aether", "Alcor", "Amalthea", "Ananke", "Anthe", "Ariel", "Atlas", "Belinda", "Bianca", "Callisto", "Calypso", "Carme", "Ceres", "Charon", "Cordelia", "Cressida", "Cybele", "Daphnis", "Deimos", "Despina", "Dione", "Eris", "Elara", "Enceladus", "Epimetheus", "Erinome", "Euanthe", "Eukelade", "Europa", "Eurydome", "Fenrir", "Fornjot", "Galatea", "Ganymede", "Greip", "Harpalyke", "Haumea", "Helene", "Himalia", "Hyperion", "Iapetus", "Iocaste", "Io", "Ison", "Janus", "Juliet", "Kale", "Kalyke", "Kiviuq", "Larissa", "Leda", "Lysithea", "Makemake", "Metis", "Mimas", "Mira", "Miranda", "Naiad", "Narvi", "Nereid", "Oberon", "Ophelia", "Orthosie", "Pandora", "Pasiphae", "Pax", "Phobos", "Phoebe", "Portia", "Prometheus", "Proteus", "Puck", "Rhea", "Sinope", "Styx", "Tarvos", "Telesto", "Tethys", "Thalassa", "Thebe", "Titan"];
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.7.8", notes: ["Realistic Time Warp (32m/s to 1y/s)", "Fixed Distance Display (AU scaling)", "Dynamic Physics Calibration"] },
     { ver: "B.0.7.7-hotfix", notes: ["Fixed invisible orbits bug (Variable collision)", "Patched circular orbit math"] },
     { ver: "B.0.7.7", notes: ["Physics stability overhaul (100 sub-steps)", "Real-time Velocity & Apsides data", "Modular Camera System", "Futuristic UI Polish", "Time Warp units (Min/s, Hr/s)"] },
     { ver: "B.0.7.6", notes: ["Optimized physics engine (Reduced GC)", "Added Changelog (Press C). We are aware that moving down moves the camera, too.", "Code cleanup"] },
@@ -165,6 +167,7 @@ function initUI() {
         DESPAWN_DISTANCE = parseFloat(document.getElementById('cfg-despawn').value);
         gridHelper.visible = document.getElementById('cfg-grid-show').checked;
         gridHelper.material.color.set(document.getElementById('cfg-grid-col').value);
+        updateTimeUI(); // Recalculate physics ratio if G/Mass changed
         document.getElementById('config-ui').style.display = 'none';
     };
 
@@ -214,15 +217,27 @@ function createLabel(text) {
     return div;
 }
 
+function getSimToRealRatio() {
+    // Calculate period of 1 AU orbit in simulation seconds
+    const simPeriod = 2 * Math.PI * Math.sqrt(Math.pow(AU_SIZE, 3) / (G * SUN_MASS));
+    // Real Earth Period = 31,536,000 seconds
+    return 31536000 / simPeriod;
+}
+
 function updateTimeUI() {
-    timeMultiplier = timeSteps[currentTimeStepIndex];
+    const realSec = timeSteps[currentTimeStepIndex];
+    const ratio = getSimToRealRatio();
+    timeMultiplier = realSec / ratio; // Convert real seconds to physics multiplier
+
     const label = document.getElementById('timeLabel');
     if(label) {
-        let text = `${timeMultiplier} X`;
-        if (timeMultiplier >= 86400) text = `${(timeMultiplier/86400).toFixed(1)} DAY/S`;
-        else if (timeMultiplier >= 3600) text = `${(timeMultiplier/3600).toFixed(1)} HR/S`;
-        else if (timeMultiplier >= 60) text = `${(timeMultiplier/60).toFixed(0)} MIN/S`;
-        else text = `${timeMultiplier} SEC/S`;
+        let text = "";
+        if (realSec >= 31536000) text = `${(realSec/31536000).toFixed(1)} YEAR/S`;
+        else if (realSec >= 2592000) text = `${(realSec/2592000).toFixed(1)} MON/S`;
+        else if (realSec >= 604800) text = `${(realSec/604800).toFixed(1)} WEEK/S`;
+        else if (realSec >= 86400) text = `${(realSec/86400).toFixed(1)} DAY/S`;
+        else if (realSec >= 3600) text = `${(realSec/3600).toFixed(1)} HR/S`;
+        else text = `${(realSec/60).toFixed(1)} MIN/S`;
         
         label.textContent = `WARP: ${text}`;
     }
@@ -507,7 +522,7 @@ function animate() {
 
     // Update UI Stats if selected
     if (selected && !selected.isSun) {
-        const dist = selected.pos.length().toFixed(1);
+        const dist = (selected.pos.length() / AU_SIZE).toFixed(2);
         extraStatsContainer.innerHTML = `
             TYPE: ${selected.type}<br>
             RADIUS: ${selected.size.toFixed(1)}<br>
