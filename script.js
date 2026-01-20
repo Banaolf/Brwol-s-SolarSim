@@ -7,7 +7,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.7.7";
+const VERSION = "B.0.7.7-hotfix";
 
 const KEYS = {
     SPAWN: '1',
@@ -26,6 +26,7 @@ let timeMultiplier = timeSteps[currentTimeStepIndex];
 const nameBank = ["Aether", "Alcor", "Amalthea", "Ananke", "Anthe", "Ariel", "Atlas", "Belinda", "Bianca", "Callisto", "Calypso", "Carme", "Ceres", "Charon", "Cordelia", "Cressida", "Cybele", "Daphnis", "Deimos", "Despina", "Dione", "Eris", "Elara", "Enceladus", "Epimetheus", "Erinome", "Euanthe", "Eukelade", "Europa", "Eurydome", "Fenrir", "Fornjot", "Galatea", "Ganymede", "Greip", "Harpalyke", "Haumea", "Helene", "Himalia", "Hyperion", "Iapetus", "Iocaste", "Io", "Ison", "Janus", "Juliet", "Kale", "Kalyke", "Kiviuq", "Larissa", "Leda", "Lysithea", "Makemake", "Metis", "Mimas", "Mira", "Miranda", "Naiad", "Narvi", "Nereid", "Oberon", "Ophelia", "Orthosie", "Pandora", "Pasiphae", "Pax", "Phobos", "Phoebe", "Portia", "Prometheus", "Proteus", "Puck", "Rhea", "Sinope", "Styx", "Tarvos", "Telesto", "Tethys", "Thalassa", "Thebe", "Titan"];
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.7.7-hotfix", notes: ["Fixed invisible orbits bug (Variable collision)", "Patched circular orbit math"] },
     { ver: "B.0.7.7", notes: ["Physics stability overhaul (100 sub-steps)", "Real-time Velocity & Apsides data", "Modular Camera System", "Futuristic UI Polish", "Time Warp units (Min/s, Hr/s)"] },
     { ver: "B.0.7.6", notes: ["Optimized physics engine (Reduced GC)", "Added Changelog (Press C). We are aware that moving down moves the camera, too.", "Code cleanup"] },
     { ver: "B.0.7.5", notes: ["Grid Helper added", "Grid configuration options"] },
@@ -277,7 +278,7 @@ function updateOrbitLine(p) {
         // Time to Apsides Calculation
         const r = rVec.length();
         const dot = rVec.dot(vVec);
-        const nu = Math.acos(Math.max(-1, Math.min(1, eVec.dot(rVec) / (e * r))));
+        const nu = (e > 1e-4) ? Math.acos(Math.max(-1, Math.min(1, eVec.dot(rVec) / (e * r)))) : 0;
         const trueAnomaly = (dot >= 0) ? nu : (2 * Math.PI - nu);
         
         const E = 2 * Math.atan(Math.sqrt((1-e)/(1+e)) * Math.tan(trueAnomaly/2));
@@ -288,14 +289,14 @@ function updateOrbitLine(p) {
         apsidesInfo = { tPe: period - tSincePe, tAp: (period * 1.5 - tSincePe) % period, period: period };
         
         // Basis Vectors
-        const num = new THREE.Vector3().copy(h).normalize(); // Orbit Normal
+        const orbitNormal = new THREE.Vector3().copy(h).normalize(); // Orbit Normal
         let u = new THREE.Vector3(); // Periapsis direction
         if (e > 0.01) {
             u.copy(eVec).normalize();
         } else {
             u.copy(rVec).normalize(); // Circular fallback
         }
-        const w = new THREE.Vector3().crossVectors(n, u);
+        const w = new THREE.Vector3().crossVectors(orbitNormal, u);
         
         const segments = 128;
         for (let i = 0; i <= segments; i++) {
