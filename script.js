@@ -136,7 +136,7 @@ function initUI() {
     const ui = document.getElementById('ui');
     const hint = document.createElement('div');
     hint.className = 'key-hint';
-    hint.innerHTML = '[P] PLACEMENT | [F] FREECAM | [Z] UNSELECT';
+    hint.innerHTML = '<br>[P] PLACEMENT | [F] FREECAM | [Z] UNSELECT';
     hint.innerHTML = '<br>[O] CONFIGURATION TAB';
     hint.innerHTML += '<br>[C] CHANGELOG';
     ui.appendChild(hint);
