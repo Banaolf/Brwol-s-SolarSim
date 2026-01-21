@@ -8,7 +8,13 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.7.8";
+const VERSION = "B.0.8.0";
+
+// --- NEW CONFIGS ---
+let SHOW_ATMOSPHERES = true;
+let SHOW_CLOUDS = true;
+let ORBIT_COLOR = '#ffffff';
+
 
 const KEYS = {
     SPAWN: '1',
@@ -26,7 +32,18 @@ let timeMultiplier = 1; // Will be calculated dynamically
 
 const nameBank = ["Aether", "Alcor", "Amalthea", "Ananke", "Anthe", "Ariel", "Atlas", "Belinda", "Bianca", "Callisto", "Calypso", "Carme", "Ceres", "Charon", "Cordelia", "Cressida", "Cybele", "Daphnis", "Deimos", "Despina", "Dione", "Eris", "Elara", "Enceladus", "Epimetheus", "Erinome", "Euanthe", "Eukelade", "Europa", "Eurydome", "Fenrir", "Fornjot", "Galatea", "Ganymede", "Greip", "Harpalyke", "Haumea", "Helene", "Himalia", "Hyperion", "Iapetus", "Iocaste", "Io", "Ison", "Janus", "Juliet", "Kale", "Kalyke", "Kiviuq", "Larissa", "Leda", "Lysithea", "Makemake", "Metis", "Mimas", "Mira", "Miranda", "Naiad", "Narvi", "Nereid", "Oberon", "Ophelia", "Orthosie", "Pandora", "Pasiphae", "Pax", "Phobos", "Phoebe", "Portia", "Prometheus", "Proteus", "Puck", "Rhea", "Sinope", "Styx", "Tarvos", "Telesto", "Tethys", "Thalassa", "Thebe", "Titan"];
 
+// --- PHYSICAL CONSTANTS & DATA ---
+const EARTH_RADIUS_KM = 6371;
+const EARTH_MASS_KG = 5.972e24;
+const JUPITER_RADIUS_KM = 69911;
+const SUN_RADIUS_KM = 696340;
+const SUN_LUMINOSITY_W = 3.828e26;
+const DENSITY_ROCKY_KGM3 = 5514;
+const DENSITY_GAS_KGM3 = 1326;
+const STEFAN_BOLTZMANN = 5.67e-8;
+
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.0", notes: ["Major UI Redesign", "Realistic Mass/Radius/Luminosity", "Planet Texturing", "Atmospheres & Clouds", "New Config Options (Orbits, FX)"] },
     { ver: "B.0.7.8", notes: ["Realistic Time Warp (32m/s to 1y/s)", "Fixed Distance Display (AU scaling)", "Dynamic Physics Calibration"] },
     { ver: "B.0.7.7-hotfix", notes: ["Fixed invisible orbits bug (Variable collision)", "Patched circular orbit math"] },
     { ver: "B.0.7.7", notes: ["Physics stability overhaul (100 sub-steps)", "Real-time Velocity & Apsides data", "Modular Camera System", "Futuristic UI Polish", "Time Warp units (Min/s, Hr/s)"] },
@@ -63,14 +80,19 @@ scene.add(new THREE.AmbientLight(0x404040, 2.5));
 
 const sun = new THREE.Mesh(new THREE.SphereGeometry(22, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
 const sunLabel = createLabel("THE_SUN");
-sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun };
+sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun, size: 22 };
 scene.add(sun);
+calculatePhysicalProperties(sun.userData.planetData); // Calculate sun's properties
+
 
 // --- GRID HELPER ---
 const gridHelper = new THREE.GridHelper(10000, 50, 0xffffff, 0xffffff);
 gridHelper.material.transparent = true;
 gridHelper.material.opacity = 0.15;
 scene.add(gridHelper);
+
+// --- TEXTURE LOADER ---
+const textureLoader = new THREE.TextureLoader();
 
 // --- UI INITIALIZATION ---
 function initUI() {
@@ -98,7 +120,10 @@ function initUI() {
             <div class="config-row"><span>MAX_PLANETS</span><input type="number" id="cfg-max" value="${MAX_PLANETS}"></div>
             <div class="config-row"><span>DESPAWN_DIST</span><input type="number" id="cfg-despawn" value="${DESPAWN_DISTANCE}"></div>
             <div class="config-row"><span>SHOW_GRID</span><input type="checkbox" id="cfg-grid-show" checked></div>
+            <div class="config-row"><span>SHOW_ATMOSPHERES</span><input type="checkbox" id="cfg-fx-atmos" checked></div>
+            <div class="config-row"><span>SHOW_CLOUDS</span><input type="checkbox" id="cfg-fx-clouds" checked></div>
             <div class="config-row"><span>GRID_COLOR</span><input type="color" id="cfg-grid-col" value="#ffffff"></div>
+            <div class="config-row"><span>ORBIT_COLOR</span><input type="color" id="cfg-orbit-col" value="${ORBIT_COLOR}"></div>
         </div>
 
         <div id="tab-keybinds" class="tab-content">
@@ -166,7 +191,15 @@ function initUI() {
         MAX_PLANETS = parseInt(document.getElementById('cfg-max').value);
         DESPAWN_DISTANCE = parseFloat(document.getElementById('cfg-despawn').value);
         gridHelper.visible = document.getElementById('cfg-grid-show').checked;
+        SHOW_ATMOSPHERES = document.getElementById('cfg-fx-atmos').checked;
+        SHOW_CLOUDS = document.getElementById('cfg-fx-clouds').checked;
         gridHelper.material.color.set(document.getElementById('cfg-grid-col').value);
+        ORBIT_COLOR = document.getElementById('cfg-orbit-col').value;
+
+        // Update existing orbits and sun properties
+        planets.forEach(p => p.orbitLine.material.color.set(ORBIT_COLOR));
+        calculatePhysicalProperties(sun.userData.planetData);
+
         updateTimeUI(); // Recalculate physics ratio if G/Mass changed
         document.getElementById('config-ui').style.display = 'none';
     };
@@ -207,6 +240,50 @@ function initUI() {
     }
 }
 initUI();
+
+// --- NEW HELPERS ---
+function calculatePhysicalProperties(p) {
+    if (p.isSun) {
+        p.realRadius = (p.size / 22) * SUN_RADIUS_KM;
+        p.realMass = (SUN_MASS / 1000) * 1.989e30; // Scale based on config
+        const temp = 5778; // Kelvin
+        p.luminosity = 4 * Math.PI * Math.pow(p.realRadius * 1000, 2) * STEFAN_BOLTZMANN * Math.pow(temp, 4);
+        return;
+    }
+
+    let density = DENSITY_ROCKY_KGM3;
+    let baseRadius = EARTH_RADIUS_KM;
+    let baseSize = 8;
+
+    if (p.type === 'GAS') {
+        density = DENSITY_GAS_KGM3;
+        baseRadius = JUPITER_RADIUS_KM;
+        baseSize = 20;
+    }
+
+    p.realRadius = (p.size / baseSize) * baseRadius;
+    p.realMass = (4/3) * Math.PI * Math.pow(p.realRadius * 1000, 3) * density;
+}
+
+function formatValue(value, unit) {
+    if (value > 1e10) {
+        return `${value.toExponential(2)} ${unit}`;
+    }
+    return `${value.toFixed(0)} ${unit}`;
+}
+
+function formatRelativeTo(value, baseValue, name) {
+    if (!value || !baseValue) return 'N/A';
+    return `${(value / baseValue).toFixed(3)} ${name}`;
+}
+
+function getTexturePath(type) {
+    let filename = '';
+    if (type === 'GAS') filename = 'Gasgiant.png';
+    else if (type === 'OCEAN') filename = 'Ocean.png';
+    else filename = 'Rocky.png';
+    return `./terrainmaps/${filename}`;
+}
 
 // --- HELPERS ---
 function createLabel(text) {
@@ -376,17 +453,42 @@ function createPlanet(typeOverride = null) {
         }
     }
 
-    const orbitMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 });
+    const orbitMat = new THREE.LineBasicMaterial({ color: ORBIT_COLOR, transparent: true, opacity: 0.25 });
     const orbitLine = new THREE.Line(new THREE.BufferGeometry(), orbitMat);
     scene.add(orbitLine);
+
+    // --- MATERIAL & TEXTURING ---
+    const material = new THREE.MeshStandardMaterial({
+        color: color,
+        roughness: 0.8,
+        map: textureLoader.load(getTexturePath(type))
+    });
 
     const pData = {
         name: `${nameBank[Math.floor(Math.random() * nameBank.length)].toUpperCase()}`,
         pos, vel, orbitLine, type, size,
-        mesh: new THREE.Mesh(new THREE.SphereGeometry(size, 32, 32), new THREE.MeshStandardMaterial({ color: color, roughness: 0.7 })),
+        mesh: new THREE.Mesh(new THREE.SphereGeometry(size, 32, 32), material),
         label: null
     };
     
+    // --- ATMOSPHERE & CLOUDS ---
+    if (type === 'OCEAN') {
+        if (SHOW_ATMOSPHERES) {
+            const atmGeo = new THREE.SphereGeometry(size * 1.05, 32, 32);
+            const atmMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.3 });
+            const atmMesh = new THREE.Mesh(atmGeo, atmMat);
+            pData.mesh.add(atmMesh);
+        }
+        if (SHOW_CLOUDS) {
+            const cloudGeo = new THREE.SphereGeometry(size * 1.02, 32, 32);
+            const cloudMap = textureLoader.load('./terrainmaps/clouds.png');
+            const cloudMat = new THREE.MeshStandardMaterial({ map: cloudMap, transparent: true, alphaMap: cloudMap, opacity: 0.7 });
+            pData.cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+            pData.mesh.add(pData.cloudMesh);
+        }
+    }
+
+    calculatePhysicalProperties(pData);
     pData.label = createLabel(pData.name);
     pData.mesh.userData.planetData = pData;
     scene.add(pData.mesh);
@@ -521,13 +623,24 @@ function animate() {
     }
 
     // Update UI Stats if selected
-    if (selected && !selected.isSun) {
+    if (selected) {
         const dist = (selected.pos.length() / AU_SIZE).toFixed(2);
-        extraStatsContainer.innerHTML = `
-            TYPE: ${selected.type}<br>
-            RADIUS: ${selected.size.toFixed(1)}<br>
-            DIST: ${dist} AU
-        `;
+        if (selected.isSun) {
+            extraStatsContainer.innerHTML = `
+                MASS: ${formatRelativeTo(selected.realMass, 1.989e30, 'Suns')}<br>
+                RADIUS: ${formatRelativeTo(selected.realRadius, SUN_RADIUS_KM, 'Suns')}<br>
+                LUMINOSITY: ${formatRelativeTo(selected.luminosity, SUN_LUMINOSITY_W, 'Suns')}
+            `;
+        } else {
+            extraStatsContainer.innerHTML = `
+                TYPE: ${selected.type}<br>
+                DIST: ${dist} AU<br>
+                <br>
+                ---PHYSICAL---<br>
+                MASS: ${formatRelativeTo(selected.realMass, EARTH_MASS_KG, 'Earths')}<br>
+                RADIUS: ${formatRelativeTo(selected.realRadius, EARTH_RADIUS_KM, 'Earths')}
+            `;
+        }
         
         // Update Velocity Input (Real-time)
         if (document.activeElement !== speedInput) {
@@ -551,6 +664,11 @@ function animate() {
 
     planets.forEach(p => {
         p.mesh.position.copy(p.pos);
+
+        // Cloud rotation
+        if (p.cloudMesh) {
+            p.cloudMesh.rotation.y += 0.0005 * timeMultiplier;
+        }
         
         // Always update selected, round-robin update others (3 per frame for smoothness)
         if (selected === p) {
