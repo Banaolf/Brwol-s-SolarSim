@@ -8,11 +8,9 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.2";
+const VERSION = "B.0.8.3";
 
 // --- NEW CONFIGS ---
-let SHOW_ATMOSPHERES = true;
-let SHOW_CLOUDS = true;
 let SHOW_STARS = true;
 let ORBIT_COLOR = '#ffffff';
 
@@ -22,7 +20,6 @@ const KEYS = {
     TIME_UP: '+',
     TIME_DOWN: '-',
     CONFIG: 'o',
-    PLACEMENT: 'p',
     DELETE: 'Delete',
     CHANGELOG: 'c',
     RESET: 'r'
@@ -45,6 +42,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.3", notes: ["N-Body Physics (Planets have gravity)", "Removed Planet Types (Generic Bodies)", "Realistic Mass Scaling", "Crash Course Orbit Visualization", "UI Cleanup"] },
     { ver: "B.0.8.2", notes: ["Camera Focus on Selected Planet", "Atmosphere/Cloud Altitude Sync", "Prevent Browser Zoom (Ctrl+/-)", "Starfield Background", "Config Pagination"] },
     { ver: "B.0.8.1", notes: ["Realistic Atmosphere Shader (Fresnel Glow)", "Fixed Raycast Selection (Grid/Orbit blocking)", "Fixed Cloud Rotation Speed", "Memory Cleanup on Delete"] },
     { ver: "B.0.8-hotfix.b", notes: ["Reverted to Procedural Planet Colors", "Added Procedural Cloud Generation", "Improved Atmosphere Shader (Cyan Glow)"] },
@@ -86,7 +84,7 @@ scene.add(new THREE.AmbientLight(0x404040, 2.5));
 
 const sun = new THREE.Mesh(new THREE.SphereGeometry(22, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
 const sunLabel = createLabel("THE_SUN");
-sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun, size: 22, pos: new THREE.Vector3(0,0,0), vel: new THREE.Vector3(0,0,0), type: "STAR" };
+sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun, size: 22, pos: new THREE.Vector3(0,0,0), vel: new THREE.Vector3(0,0,0), type: "STAR", mass: SUN_MASS };
 scene.add(sun);
 calculatePhysicalProperties(sun.userData.planetData); // Calculate sun's properties
 
@@ -111,7 +109,6 @@ function initUI() {
     const hint = document.createElement('div');
     hint.className = 'key-hint';
     hint.innerHTML = '<br>[O] CONFIGURATION TAB';
-    hint.innerHTML += '<br>[P] PLACEMENT MENU';
     hint.innerHTML += '<br>[C] CHANGELOG';
     ui.appendChild(hint);
 
@@ -122,8 +119,6 @@ function initUI() {
         { label: "MAX_PLANETS", type: "number", id: "cfg-max", value: MAX_PLANETS },
         { label: "DESPAWN_DIST", type: "number", id: "cfg-despawn", value: DESPAWN_DISTANCE },
         { label: "SHOW_GRID", type: "checkbox", id: "cfg-grid-show", checked: true },
-        { label: "SHOW_ATMOSPHERES", type: "checkbox", id: "cfg-fx-atmos", checked: SHOW_ATMOSPHERES },
-        { label: "SHOW_CLOUDS", type: "checkbox", id: "cfg-fx-clouds", checked: SHOW_CLOUDS },
         { label: "SHOW_STARS", type: "checkbox", id: "cfg-fx-stars", checked: SHOW_STARS },
         { label: "GRID_COLOR", type: "color", id: "cfg-grid-col", value: "#ffffff" },
         { label: "ORBIT_COLOR", type: "color", id: "cfg-orbit-col", value: ORBIT_COLOR }
@@ -135,7 +130,6 @@ function initUI() {
         { label: "TIME DOWN (Ctrl+)", action: "TIME_DOWN" },
         { label: "DELETE (Ctrl+)", action: "DELETE" },
         { label: "CONFIG MENU", action: "CONFIG" },
-        { label: "PLACEMENT MENU", action: "PLACEMENT" },
         { label: "CHANGELOG", action: "CHANGELOG" },
         { label: "RESET", action: "RESET" }
     ];
@@ -164,17 +158,6 @@ function initUI() {
     `;
     document.body.appendChild(configDiv);
 
-    // Create Placement UI
-    const placeDiv = document.createElement('div');
-    placeDiv.id = 'placement-ui';
-    placeDiv.innerHTML = `
-        <h3>SPAWN PLANET</h3>
-        <button id="spawn-rocky">ROCKY</button>
-        <button id="spawn-ocean">OCEAN</button>
-        <button id="spawn-gas">GAS GIANT</button>
-    `;
-    document.body.appendChild(placeDiv);
-
     // Create Changelog UI
     const logDiv = document.createElement('div');
     logDiv.id = 'changelog-ui';
@@ -190,11 +173,6 @@ function initUI() {
 
     // --- EVENT LISTENERS FOR UI ---
     
-    // Placement Buttons
-    document.getElementById('spawn-rocky').onclick = () => createPlanet('ROCKY');
-    document.getElementById('spawn-ocean').onclick = () => createPlanet('OCEAN');
-    document.getElementById('spawn-gas').onclick = () => createPlanet('GAS');
-
     // Tab Switching
     const tabs = { general: document.getElementById('tab-general'), keybinds: document.getElementById('tab-keybinds') };
     const btns = { general: document.getElementById('tab-btn-general'), keybinds: document.getElementById('tab-btn-keybinds') };
@@ -297,8 +275,6 @@ function initUI() {
         MAX_PLANETS = find('cfg-max');
         DESPAWN_DISTANCE = find('cfg-despawn');
         gridHelper.visible = find('cfg-grid-show');
-        SHOW_ATMOSPHERES = find('cfg-fx-atmos');
-        SHOW_CLOUDS = find('cfg-fx-clouds');
         SHOW_STARS = find('cfg-fx-stars');
         gridHelper.material.color.set(find('cfg-grid-col'));
         ORBIT_COLOR = find('cfg-orbit-col');
@@ -335,23 +311,6 @@ function initUI() {
 }
 initUI();
 
-// --- SHADERS ---
-const ATMOSPHERE_VERTEX_SHADER = `
-varying vec3 vNormal;
-void main() {
-    vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
-
-const ATMOSPHERE_FRAGMENT_SHADER = `
-varying vec3 vNormal;
-void main() {
-    float intensity = pow(0.65 - dot(vNormal, vec3(0, 0, 1.0)), 4.0);
-    gl_FragColor = vec4(0.1, 0.9, 1.0, 1.0) * intensity * 1.5;
-}
-`;
-
 // --- NEW HELPERS ---
 function calculatePhysicalProperties(p) {
     if (p.isSun) {
@@ -362,17 +321,8 @@ function calculatePhysicalProperties(p) {
         return;
     }
 
-    let density = DENSITY_ROCKY_KGM3;
-    let baseRadius = EARTH_RADIUS_KM;
-    let baseSize = 8;
-
-    if (p.type === 'GAS') {
-        density = DENSITY_GAS_KGM3;
-        baseRadius = JUPITER_RADIUS_KM;
-        baseSize = 20;
-    }
-
-    p.realRadius = (p.size / baseSize) * baseRadius;
+    let density = DENSITY_ROCKY_KGM3; // Default density
+    p.realRadius = (p.size / 8) * EARTH_RADIUS_KM; // Scale relative to "Earth size" of 8
     p.realMass = (4/3) * Math.PI * Math.pow(p.realRadius * 1000, 3) * density;
 }
 
@@ -386,34 +336,6 @@ function formatValue(value, unit) {
 function formatRelativeTo(value, baseValue, name) {
     if (!value || !baseValue) return 'N/A';
     return `${(value / baseValue).toFixed(3)} ${name}`;
-}
-
-function createProceduralCloudTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    
-    // Transparent background
-    ctx.clearRect(0, 0, 512, 256);
-    
-    // Draw random cloud puffs
-    for (let i = 0; i < 150; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 256;
-        const r = Math.random() * 30 + 10;
-        
-        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-        grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = grad;
-        ctx.fill();
-    }
-    
-    return new THREE.CanvasTexture(canvas);
 }
 
 // --- HELPERS ---
@@ -531,9 +453,13 @@ function updateOrbitLine(p) {
             const theta = (i / segments) * 2 * Math.PI;
             const rDist = p_param / (1 + e * Math.cos(theta));
             
+            // Crash Course Check: If point is inside Sun, stop drawing
+            if (rDist < CRASH_DISTANCE) continue;
+            
             const pt = new THREE.Vector3()
                 .addScaledVector(u, rDist * Math.cos(theta))
                 .addScaledVector(w, rDist * Math.sin(theta));
+            if (pt.length() < CRASH_DISTANCE) continue;
             points.push(pt);
         }
     } else {
@@ -561,7 +487,7 @@ function updateOrbitLine(p) {
     p.orbitalData = apsidesInfo;
 }
 
-function createPlanet(typeOverride = null) {
+function createPlanet() {
     if (planets.length >= MAX_PLANETS) return;
     
     const lastDist = planets.length > 0 ? planets[planets.length-1].pos.length() : 180;
@@ -570,24 +496,9 @@ function createPlanet(typeOverride = null) {
     const vMag = Math.sqrt((G * SUN_MASS) / distance);
     const vel = new THREE.Vector3(0, 0, vMag); 
 
-    // --- PLANET TYPES ---
-    let type, color, size;
-    
-    if (typeOverride) {
-        type = typeOverride;
-        if (type === "ROCKY") { const grey = 0.5 + Math.random() * 0.3; color = new THREE.Color(grey, grey, grey); size = 6 + Math.random() * 3; }
-        else if (type === "OCEAN") { color = new THREE.Color(0, 0.4 + Math.random() * 0.4, 0.8 + Math.random() * 0.2); size = 7 + Math.random() * 3; }
-        else if (type === "GAS") { color = new THREE.Color(Math.random(), Math.random(), Math.random()); size = 16 + Math.random() * 6; }
-    } else {
-        const roll = Math.random();
-        if (roll < 0.4) {
-            type = "ROCKY"; const grey = 0.5 + Math.random() * 0.3; color = new THREE.Color(grey, grey, grey); size = 6 + Math.random() * 3;
-        } else if (roll < 0.7) {
-            type = "OCEAN"; color = new THREE.Color(0, 0.4 + Math.random() * 0.4, 0.8 + Math.random() * 0.2); size = 7 + Math.random() * 3;
-        } else {
-            type = "GAS"; color = new THREE.Color(Math.random(), Math.random(), Math.random()); size = 16 + Math.random() * 6;
-        }
-    }
+    // --- GENERIC PLANET GENERATION ---
+    const size = 4 + Math.random() * 12; // Random size
+    const color = new THREE.Color(Math.random(), Math.random(), Math.random());
 
     const orbitMat = new THREE.LineBasicMaterial({ color: ORBIT_COLOR, transparent: true, opacity: 0.25 });
     const orbitLine = new THREE.Line(new THREE.BufferGeometry(), orbitMat);
@@ -600,36 +511,14 @@ function createPlanet(typeOverride = null) {
     });
 
     const pData = {
-        name: `${nameBank[Math.floor(Math.random() * nameBank.length)].toUpperCase()}`,
-        pos, vel, orbitLine, type, size,
+        name: nameBank[Math.floor(Math.random() * nameBank.length)].toUpperCase(),
+        pos, vel, orbitLine, type: "PLANET", size,
         mesh: new THREE.Mesh(new THREE.SphereGeometry(size, 32, 32), material),
-        label: null
+        label: null,
+        // Simulation Mass: Proportional to volume (size^3) relative to Sun
+        mass: SUN_MASS * Math.pow(size / 22, 3) * 0.5 
     };
     
-    // --- ATMOSPHERE & CLOUDS ---
-    if (type === 'OCEAN') {
-        if (SHOW_ATMOSPHERES) {
-            const atmGeo = new THREE.SphereGeometry(size * 1.04, 32, 32); // Lowered to match clouds
-            const atmMat = new THREE.ShaderMaterial({
-                vertexShader: ATMOSPHERE_VERTEX_SHADER,
-                fragmentShader: ATMOSPHERE_FRAGMENT_SHADER,
-                blending: THREE.AdditiveBlending,
-                side: THREE.FrontSide,
-                transparent: true,
-                depthWrite: false
-            });
-            const atmMesh = new THREE.Mesh(atmGeo, atmMat);
-            pData.mesh.add(atmMesh);
-        }
-        if (SHOW_CLOUDS) {
-            const cloudGeo = new THREE.SphereGeometry(size * 1.03, 32, 32);
-            const cloudMap = createProceduralCloudTexture();
-            const cloudMat = new THREE.MeshStandardMaterial({ map: cloudMap, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
-            pData.cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
-            pData.mesh.add(pData.cloudMesh);
-        }
-    }
-
     calculatePhysicalProperties(pData);
     pData.label = createLabel(pData.name);
     pData.mesh.userData.planetData = pData;
@@ -672,11 +561,6 @@ window.addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() === KEYS.CONFIG.toLowerCase()) {
         const cfg = document.getElementById('config-ui');
         cfg.style.display = (cfg.style.display === 'none' || cfg.style.display === '') ? 'block' : 'none';
-    }
-    
-    if (e.key.toLowerCase() === KEYS.PLACEMENT.toLowerCase()) {
-        const pl = document.getElementById('placement-ui');
-        pl.style.display = (pl.style.display === 'none' || pl.style.display === '') ? 'block' : 'none';
     }
 
     if (e.key.toLowerCase() === KEYS.CHANGELOG.toLowerCase()) {
@@ -758,24 +642,38 @@ function animate() {
     const subDt = (deltaTime * timeMultiplier) / SUB_STEPS;
 
     for (let s = 0; s < SUB_STEPS; s++) {
+        // N-Body Physics: Calculate all forces first
+        const forces = new Array(planets.length).fill(null).map(() => new THREE.Vector3());
+
         for (let i = planets.length - 1; i >= 0; i--) {
             const p = planets[i];
-            const rSq = p.pos.lengthSq();
+            
+            // Sun Gravity
+            const diffSun = new THREE.Vector3(0,0,0).sub(p.pos);
+            const rSq = diffSun.lengthSq();
             const r = Math.sqrt(rSq);
 
-            if (r < CRASH_DISTANCE) {
-                console.log(`%cCRASH: ${p.name}`, "color: #ff0000");
-                scene.remove(p.mesh); scene.remove(p.orbitLine); p.label.remove();
-                planets.splice(i, 1); continue;
-            }
-            if (r > DESPAWN_DISTANCE) {
-                console.log(`%cDESPAWN: ${p.name}`, "color: #ffa500");
-                scene.remove(p.mesh); scene.remove(p.orbitLine); p.label.remove();
-                planets.splice(i, 1); continue;
-            }
+            if (r < CRASH_DISTANCE) { scene.remove(p.mesh); scene.remove(p.orbitLine); p.label.remove(); planets.splice(i, 1); continue; }
+            if (r > DESPAWN_DISTANCE) { scene.remove(p.mesh); scene.remove(p.orbitLine); p.label.remove(); planets.splice(i, 1); continue; }
 
-            const accFactor = -(G * SUN_MASS) / (rSq * r);
-            p.vel.addScaledVector(p.pos, accFactor * subDt);
+            const sunAcc = diffSun.normalize().multiplyScalar((G * SUN_MASS) / rSq);
+            forces[i].add(sunAcc);
+
+            // Planet-Planet Gravity (N-Body)
+            for (let j = 0; j < planets.length; j++) {
+                if (i === j) continue;
+                const other = planets[j];
+                const diff = other.pos.clone().sub(p.pos);
+                const distSq = diff.lengthSq();
+                const force = diff.normalize().multiplyScalar((G * other.mass) / distSq);
+                forces[i].add(force);
+            }
+        }
+
+        // Apply Forces
+        for (let i = 0; i < planets.length; i++) {
+            const p = planets[i];
+            p.vel.add(forces[i].multiplyScalar(subDt));
             p.pos.addScaledVector(p.vel, subDt);
         }
     }
@@ -822,12 +720,6 @@ function animate() {
 
     planets.forEach(p => {
         p.mesh.position.copy(p.pos);
-
-        // Cloud rotation
-        if (p.cloudMesh) {
-            // Clamp rotation speed to avoid strobing at high time warps
-            p.cloudMesh.rotation.y += Math.min(0.02, 0.0005 * timeMultiplier);
-        }
         
         // Always update selected, round-robin update others (3 per frame for smoothness)
         if (selected === p) {
