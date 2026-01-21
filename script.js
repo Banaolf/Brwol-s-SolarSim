@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.3";
+const VERSION = "B.0.8.4";
 
 // --- NEW CONFIGS ---
 let SHOW_STARS = true;
@@ -19,11 +19,18 @@ const KEYS = {
     SPAWN: '1',
     TIME_UP: '+',
     TIME_DOWN: '-',
-    CONFIG: 'o',
+    CONFIG: 'o', 
     DELETE: 'Delete',
     CHANGELOG: 'c',
     RESET: 'r'
 };
+
+const PLACEMENT_PRESETS = [
+    { name: "1 EARTH", mass: 1, radius: 1 },
+    { name: "2 EARTH", mass: 2, radius: 1.25 },
+    { name: "0.5 EARTH", mass: 0.5, radius: 0.8 },
+    { name: "LUNAR", mass: 0.012, radius: 0.27 }
+];
 
 const timeSteps = [1920, 3600, 14400, 43200, 86400, 259200, 604800, 1209600, 2592000, 7776000, 15552000, 31536000];
 let currentTimeStepIndex = 4; // Starts at 1 Day/s
@@ -42,6 +49,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.4", notes: ["Polished Orbits (Reduced Wobble)", "Realistic Size/Mass Scaling", "Ghost Placement Tool (P)", "Delete Tool Toggle (Del)", "New Planet Presets"] },
     { ver: "B.0.8.3", notes: ["N-Body Physics (Planets have gravity)", "Removed Planet Types (Generic Bodies)", "Realistic Mass Scaling", "Crash Course Orbit Visualization", "UI Cleanup"] },
     { ver: "B.0.8.2", notes: ["Camera Focus on Selected Planet", "Atmosphere/Cloud Altitude Sync", "Prevent Browser Zoom (Ctrl+/-)", "Starfield Background", "Config Pagination"] },
     { ver: "B.0.8.1", notes: ["Realistic Atmosphere Shader (Fresnel Glow)", "Fixed Raycast Selection (Grid/Orbit blocking)", "Fixed Cloud Rotation Speed", "Memory Cleanup on Delete"] },
@@ -69,6 +77,12 @@ const nameInput = document.getElementById('planetNameDisplay');
 const speedInput = document.getElementById('speedDisplay');
 const colorPicker = document.getElementById('colorPicker');
 let extraStatsContainer = null; // Will be created dynamically
+
+// --- TOOLS STATE ---
+let placementMode = false;
+let deleteMode = false;
+let selectedPreset = null;
+let ghostMesh = null;
 
 // --- SCENE SETUP ---
 const scene = new THREE.Scene();
@@ -102,12 +116,20 @@ gridHelper.material.transparent = true;
 gridHelper.material.opacity = 0.15;
 scene.add(gridHelper);
 
+// --- GHOST MESH ---
+const ghostGeo = new THREE.SphereGeometry(1, 32, 32);
+const ghostMat = new THREE.MeshBasicMaterial({ color: 0x00f2ff, transparent: true, opacity: 0.4, wireframe: true });
+ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
+ghostMesh.visible = false;
+scene.add(ghostMesh);
+
 // --- UI INITIALIZATION ---
 function initUI() {
     // Add Config Hint to Main UI
     const ui = document.getElementById('ui');
     const hint = document.createElement('div');
     hint.className = 'key-hint';
+    hint.innerHTML = '[P] PLACEMENT TOOL | [DEL] DELETE TOOL';
     hint.innerHTML = '<br>[O] CONFIGURATION TAB';
     hint.innerHTML += '<br>[C] CHANGELOG';
     ui.appendChild(hint);
@@ -130,7 +152,6 @@ function initUI() {
         { label: "TIME DOWN (Ctrl+)", action: "TIME_DOWN" },
         { label: "DELETE (Ctrl+)", action: "DELETE" },
         { label: "CONFIG MENU", action: "CONFIG" },
-        { label: "CHANGELOG", action: "CHANGELOG" },
         { label: "RESET", action: "RESET" }
     ];
 
@@ -157,6 +178,17 @@ function initUI() {
         </div>
     `;
     document.body.appendChild(configDiv);
+
+    // Create Placement Bar
+    const placeBar = document.createElement('div');
+    placeBar.id = 'placement-bar';
+    PLACEMENT_PRESETS.forEach(p => {
+        const btn = document.createElement('button');
+        btn.textContent = p.name;
+        btn.onclick = () => selectPreset(p);
+        placeBar.appendChild(btn);
+    });
+    document.body.appendChild(placeBar);
 
     // Create Changelog UI
     const logDiv = document.createElement('div');
@@ -311,6 +343,18 @@ function initUI() {
 }
 initUI();
 
+function selectPreset(preset) {
+    selectedPreset = preset;
+    placementMode = true;
+    deleteMode = false;
+    document.body.style.cursor = 'crosshair';
+    
+    // Update ghost size based on preset radius (Visual Scale: 1 Earth Radius = 1 Unit)
+    const visualSize = Math.max(0.5, preset.radius * 1.5); 
+    ghostMesh.scale.set(visualSize, visualSize, visualSize);
+    ghostMesh.visible = true;
+}
+
 // --- NEW HELPERS ---
 function calculatePhysicalProperties(p) {
     if (p.isSun) {
@@ -321,9 +365,13 @@ function calculatePhysicalProperties(p) {
         return;
     }
 
-    let density = DENSITY_ROCKY_KGM3; // Default density
-    p.realRadius = (p.size / 8) * EARTH_RADIUS_KM; // Scale relative to "Earth size" of 8
-    p.realMass = (4/3) * Math.PI * Math.pow(p.realRadius * 1000, 3) * density;
+    // If created from preset, we have realMass/realRadius. If random, we derive.
+    if (!p.realMass) {
+        // Fallback for random generation (legacy/random spawn)
+        // Assume p.size 1.5 = Earth Size
+        p.realRadius = (p.size / 1.5) * EARTH_RADIUS_KM;
+        p.realMass = (4/3) * Math.PI * Math.pow(p.realRadius * 1000, 3) * DENSITY_ROCKY_KGM3;
+    }
 }
 
 function formatValue(value, unit) {
@@ -487,17 +535,27 @@ function updateOrbitLine(p) {
     p.orbitalData = apsidesInfo;
 }
 
-function createPlanet() {
+function createPlanet(posOverride = null, preset = null) {
     if (planets.length >= MAX_PLANETS) return;
     
-    const lastDist = planets.length > 0 ? planets[planets.length-1].pos.length() : 180;
-    const distance = lastDist + 120;
-    const pos = new THREE.Vector3(distance, 0, 0);
-    const vMag = Math.sqrt((G * SUN_MASS) / distance);
+    let pos, size, realMass, realRadius;
+
+    if (posOverride && preset) {
+        pos = posOverride;
+        realMass = preset.mass * EARTH_MASS_KG;
+        realRadius = preset.radius * EARTH_RADIUS_KM;
+        size = Math.max(0.5, preset.radius * 1.5); // Visual scale
+    } else {
+        // Random Generation
+        const lastDist = planets.length > 0 ? planets[planets.length-1].pos.length() : 180;
+        const distance = lastDist + 80 + Math.random() * 100;
+        pos = new THREE.Vector3(distance, 0, 0);
+        size = 0.5 + Math.random() * 2.5; // Smaller visual size (0.5 to 3)
+    }
+
+    const vMag = Math.sqrt((G * SUN_MASS) / pos.length());
     const vel = new THREE.Vector3(0, 0, vMag); 
 
-    // --- GENERIC PLANET GENERATION ---
-    const size = 4 + Math.random() * 12; // Random size
     const color = new THREE.Color(Math.random(), Math.random(), Math.random());
 
     const orbitMat = new THREE.LineBasicMaterial({ color: ORBIT_COLOR, transparent: true, opacity: 0.25 });
@@ -515,9 +573,20 @@ function createPlanet() {
         pos, vel, orbitLine, type: "PLANET", size,
         mesh: new THREE.Mesh(new THREE.SphereGeometry(size, 32, 32), material),
         label: null,
-        // Simulation Mass: Proportional to volume (size^3) relative to Sun
-        mass: SUN_MASS * Math.pow(size / 22, 3) * 0.5 
+        realMass: realMass,
+        realRadius: realRadius
     };
+    
+    // Calculate Simulation Mass from Real Mass
+    // Sun Mass (Sim) = 1000. Sun Mass (Real) = 1.989e30.
+    // Ratio = 1000 / 1.989e30.
+    if (realMass) {
+        pData.mass = realMass * (SUN_MASS / 1.989e30);
+    } else {
+        // Fallback for random
+        calculatePhysicalProperties(pData); // Get real mass first
+        pData.mass = pData.realMass * (SUN_MASS / 1.989e30);
+    }
     
     calculatePhysicalProperties(pData);
     pData.label = createLabel(pData.name);
@@ -563,14 +632,35 @@ window.addEventListener('keydown', (e) => {
         cfg.style.display = (cfg.style.display === 'none' || cfg.style.display === '') ? 'block' : 'none';
     }
 
+    if (e.key.toLowerCase() === KEYS.PLACEMENT.toLowerCase()) {
+        const bar = document.getElementById('placement-bar');
+        bar.style.display = (bar.style.display === 'none' || bar.style.display === '') ? 'flex' : 'none';
+        if (bar.style.display === 'none') {
+            placementMode = false;
+            ghostMesh.visible = false;
+            document.body.style.cursor = 'default';
+        }
+    }
+
     if (e.key.toLowerCase() === KEYS.CHANGELOG.toLowerCase()) {
         const cl = document.getElementById('changelog-ui');
         cl.style.display = (cl.style.display === 'none' || cl.style.display === '') ? 'block' : 'none';
     }
 
+    if (e.key === KEYS.DELETE) {
+        deleteMode = !deleteMode;
+        placementMode = false;
+        ghostMesh.visible = false;
+        document.body.style.cursor = deleteMode ? 'not-allowed' : 'default';
+        // Visual feedback
+        const hint = document.querySelector('.key-hint');
+        if(hint) hint.style.color = deleteMode ? '#ff0000' : 'white';
+    }
+
     if (!e.ctrlKey) return;
     if (e.key === KEYS.SPAWN) { e.preventDefault(); createPlanet(); }
-    if (e.key === KEYS.DELETE) { e.preventDefault(); deleteOutermostPlanet(); }
+    // Ctrl+Delete still deletes outermost for convenience
+    if (e.key === KEYS.DELETE) { e.preventDefault(); deleteOutermostPlanet(); deleteMode = false; } 
     if (e.key === KEYS.TIME_UP) { e.preventDefault(); if (currentTimeStepIndex < timeSteps.length - 1) { currentTimeStepIndex++; updateTimeUI(); } }
     if (e.key === KEYS.TIME_DOWN) { e.preventDefault(); if (currentTimeStepIndex > 0) { currentTimeStepIndex--; updateTimeUI(); } }
 });
@@ -578,6 +668,25 @@ window.addEventListener('keydown', (e) => {
 // Selection & Mouse
 window.addEventListener('mousedown', (e) => {
     if (e.button === 2) CameraManager.isRightClick = true;
+    
+    // Handle Placement Click
+    if (placementMode && e.button === 0 && !e.target.closest('button')) {
+        const mouse = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const target = new THREE.Vector3();
+        raycaster.ray.intersectPlane(plane, target);
+        
+        if (target) {
+            createPlanet(target, selectedPreset);
+            placementMode = false;
+            ghostMesh.visible = false;
+            document.body.style.cursor = 'default';
+            return;
+        }
+    }
+
     if (e.target.closest('#ui') || e.target.closest('#planet-ui')) return;
     
     const mouse = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
@@ -596,6 +705,16 @@ window.addEventListener('mousedown', (e) => {
     }
 
     if (targetData) {
+        if (deleteMode) {
+            // Delete clicked planet
+            const idx = planets.indexOf(targetData);
+            if (idx > -1) {
+                scene.remove(targetData.mesh); scene.remove(targetData.orbitLine); targetData.label.remove();
+                planets.splice(idx, 1);
+                if (selected === targetData) { selected = null; uiPanel.style.display = 'none'; }
+            }
+            return;
+        }
         selected = targetData;
         uiPanel.style.display = 'block';
         nameInput.value = selected.name;
@@ -640,6 +759,17 @@ function animate() {
     lastTime = performance.now();
 
     const subDt = (deltaTime * timeMultiplier) / SUB_STEPS;
+
+    // Update Ghost Mesh
+    if (placementMode) {
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2((lastMouseX / window.innerWidth) * 2 - 1, -(lastMouseY / window.innerHeight) * 2 + 1);
+        raycaster.setFromCamera(mouse, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const target = new THREE.Vector3();
+        raycaster.ray.intersectPlane(plane, target);
+        if (target) ghostMesh.position.copy(target);
+    }
 
     for (let s = 0; s < SUB_STEPS; s++) {
         // N-Body Physics: Calculate all forces first
@@ -742,6 +872,12 @@ function animate() {
 
     renderer.render(scene, camera);
 }
+
+let lastMouseX = 0, lastMouseY = 0;
+window.addEventListener('mousemove', e => {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+});
 
 document.getElementById('version-tag').textContent = `VERSION: ${VERSION}`;
 animate();

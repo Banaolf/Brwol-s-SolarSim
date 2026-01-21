@@ -108,20 +108,23 @@ button:hover {
 .page-btn { width: 30px; padding: 5px; }
 
 /* Placement UI */
-#placement-ui {
+#placement-bar {
     display: none;
     position: absolute;
-    left: 20px;
-    top: 50%;
-    transform: translateY(-50%);
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
     background: rgba(10, 15, 20, 0.9);
     padding: 15px;
     border: 1px solid rgba(0, 242, 255, 0.5);
-    width: 140px;
+    border-radius: 8px;
     box-shadow: 0 0 15px rgba(0, 242, 255, 0.2);
+    display: flex;
+    gap: 10px;
+    z-index: 2500;
 }
-#placement-ui h3 { margin-top: 0; color: #0f0; font-size: 14px; text-align: center; }
-#placement-ui button { margin-bottom: 8px; font-size: 12px; }
+#placement-bar button { width: auto; min-width: 100px; font-size: 12px; margin: 0; }
+#placement-bar.active { display: flex; }
 
 /* Changelog UI */
 #changelog-ui {
