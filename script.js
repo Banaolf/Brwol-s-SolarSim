@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.4-B";
+const VERSION = "B.0.8.4-B.Hotfix";
 
 // --- NEW CONFIGS ---
 let SHOW_STARS = true;
@@ -24,7 +24,8 @@ const KEYS = {
     DESELECT: 'z',
     DELETE: 'Delete',
     CHANGELOG: 'c',
-    RESET: 'r'
+    RESET: 'r',
+    PLACEMENT: 'p'
 };
 
 const PLACEMENT_PRESETS = [
@@ -51,6 +52,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.4-B.Hotfix", notes: ["Fixed Critical Keybind Crash (Missing Placement Key definition)", "Implemented Reset Key (R)"] },
     { ver: "B.0.8.4", notes: ["Polished Orbits (Reduced Wobble)", "Realistic Size/Mass Scaling", "Ghost Placement Tool (P)", "Delete Tool Toggle (Del)", "New Planet Presets"] },
     { ver: "B.0.8.3", notes: ["N-Body Physics (Planets have gravity)", "Removed Planet Types (Generic Bodies)", "Realistic Mass Scaling", "Crash Course Orbit Visualization", "UI Cleanup"] },
     { ver: "B.0.8.2", notes: ["Camera Focus on Selected Planet", "Atmosphere/Cloud Altitude Sync", "Prevent Browser Zoom (Ctrl+/-)", "Starfield Background", "Config Pagination"] },
@@ -693,6 +695,20 @@ window.addEventListener('keydown', (e) => {
         selected = null;
         uiPanel.style.display = 'none';
         freecamMode = false;
+    }
+
+    if (e.key.toLowerCase() === KEYS.RESET.toLowerCase()) {
+        for (let i = planets.length - 1; i >= 0; i--) {
+            const p = planets[i];
+            scene.remove(p.mesh);
+            p.mesh.traverse(c => { if(c.geometry) c.geometry.dispose(); if(c.material) c.material.dispose(); });
+            scene.remove(p.orbitLine);
+            p.orbitLine.geometry.dispose();
+            p.label.remove();
+        }
+        planets = [];
+        selected = null;
+        uiPanel.style.display = 'none';
     }
 
     if (e.key === KEYS.DELETE) {
