@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.4";
+const VERSION = "B.0.8.4-B";
 
 // --- NEW CONFIGS ---
 let SHOW_STARS = true;
@@ -20,6 +20,8 @@ const KEYS = {
     TIME_UP: '+',
     TIME_DOWN: '-',
     CONFIG: 'o', 
+    FREECAM: 'f',
+    DESELECT: 'z',
     DELETE: 'Delete',
     CHANGELOG: 'c',
     RESET: 'r'
@@ -53,7 +55,7 @@ const CHANGELOG_DATA = [
     { ver: "B.0.8.3", notes: ["N-Body Physics (Planets have gravity)", "Removed Planet Types (Generic Bodies)", "Realistic Mass Scaling", "Crash Course Orbit Visualization", "UI Cleanup"] },
     { ver: "B.0.8.2", notes: ["Camera Focus on Selected Planet", "Atmosphere/Cloud Altitude Sync", "Prevent Browser Zoom (Ctrl+/-)", "Starfield Background", "Config Pagination"] },
     { ver: "B.0.8.1", notes: ["Realistic Atmosphere Shader (Fresnel Glow)", "Fixed Raycast Selection (Grid/Orbit blocking)", "Fixed Cloud Rotation Speed", "Memory Cleanup on Delete"] },
-    { ver: "B.0.8-hotfix.b", notes: ["Reverted to Procedural Planet Colors", "Added Procedural Cloud Generation", "Improved Atmosphere Shader (Cyan Glow)"] },
+    { ver: "B.0.8-hotfix.B", notes: ["Reverted to Procedural Planet Colors", "Added Procedural Cloud Generation", "Improved Atmosphere Shader (Cyan Glow)"] },
     { ver: "B.0.8-hotfix", notes: ["Fixed Texture 404s (Folder path)", "Fixed Ocean planet selection", "Added missing Sun properties", "Fixed Sun selection crash"] },
     { ver: "B.0.8.0", notes: ["Major UI Redesign", "Realistic Mass/Radius/Luminosity", "Planet Texturing", "Atmospheres & Clouds", "New Config Options (Orbits, FX)"] },
     { ver: "B.0.7.8", notes: ["Realistic Time Warp (32m/s to 1y/s)", "Fixed Distance Display (AU scaling)", "Dynamic Physics Calibration"] },
@@ -83,6 +85,9 @@ let placementMode = false;
 let deleteMode = false;
 let selectedPreset = null;
 let ghostMesh = null;
+let freecamMode = false;
+let freecamPos = new THREE.Vector3();
+const keyState = { w: false, a: false, s: false, d: false };
 
 // --- SCENE SETUP ---
 const scene = new THREE.Scene();
@@ -129,7 +134,7 @@ function initUI() {
     const ui = document.getElementById('ui');
     const hint = document.createElement('div');
     hint.className = 'key-hint';
-    hint.innerHTML = '[P] PLACEMENT TOOL | [DEL] DELETE TOOL';
+    hint.innerHTML = '[P] PLACEMENT | [F] FREECAM | [Z] UNSELECT';
     hint.innerHTML = '<br>[O] CONFIGURATION TAB';
     hint.innerHTML += '<br>[C] CHANGELOG';
     ui.appendChild(hint);
@@ -538,23 +543,40 @@ function updateOrbitLine(p) {
 function createPlanet(posOverride = null, preset = null) {
     if (planets.length >= MAX_PLANETS) return;
     
-    let pos, size, realMass, realRadius;
+    let pos, vel, size, realMass, realRadius;
 
     if (posOverride && preset) {
         pos = posOverride;
         realMass = preset.mass * EARTH_MASS_KG;
         realRadius = preset.radius * EARTH_RADIUS_KM;
         size = Math.max(0.5, preset.radius * 1.5); // Visual scale
+
+        // Moon Logic: If a planet is selected, orbit it. Otherwise orbit Sun.
+        if (selected && !selected.isSun) {
+            const distVec = new THREE.Vector3().subVectors(pos, selected.pos);
+            const r = distVec.length();
+            const vOrb = Math.sqrt((G * selected.mass) / r);
+            // Tangent direction relative to parent
+            const orbitDir = new THREE.Vector3().crossVectors(distVec, new THREE.Vector3(0, 1, 0)).normalize();
+            vel = selected.vel.clone().add(orbitDir.multiplyScalar(vOrb));
+        } else {
+            // Sun Orbit (Corrected for any position)
+            const r = pos.length();
+            const vOrb = Math.sqrt((G * SUN_MASS) / r);
+            const orbitDir = new THREE.Vector3().crossVectors(pos, new THREE.Vector3(0, 1, 0)).normalize();
+            vel = orbitDir.multiplyScalar(vOrb);
+        }
     } else {
         // Random Generation
         const lastDist = planets.length > 0 ? planets[planets.length-1].pos.length() : 180;
         const distance = lastDist + 80 + Math.random() * 100;
         pos = new THREE.Vector3(distance, 0, 0);
         size = 0.5 + Math.random() * 2.5; // Smaller visual size (0.5 to 3)
+        
+        // Default velocity for random spawn on X axis
+        const vMag = Math.sqrt((G * SUN_MASS) / pos.length());
+        vel = new THREE.Vector3(0, 0, vMag); 
     }
-
-    const vMag = Math.sqrt((G * SUN_MASS) / pos.length());
-    const vel = new THREE.Vector3(0, 0, vMag); 
 
     const color = new THREE.Color(Math.random(), Math.random(), Math.random());
 
@@ -604,13 +626,23 @@ const CameraManager = {
     isRightClick: false,
     
     update: function() {
-        const target = selected ? selected.pos : new THREE.Vector3(0,0,0);
+        if (freecamMode) {
+            const moveSpeed = Math.max(10, this.radius * 0.02);
+            if (keyState.w) freecamPos.z -= moveSpeed;
+            if (keyState.s) freecamPos.z += moveSpeed;
+            if (keyState.a) freecamPos.x -= moveSpeed;
+            if (keyState.d) freecamPos.x += moveSpeed;
+        } else {
+            const target = selected ? selected.pos : new THREE.Vector3(0,0,0);
+            freecamPos.copy(target);
+        }
+
         camera.position.set(
-            target.x + this.radius * Math.sin(this.phi) * Math.cos(this.theta),
-            target.y + this.radius * Math.cos(this.phi),
-            target.z + this.radius * Math.sin(this.phi) * Math.sin(this.theta)
+            freecamPos.x + this.radius * Math.sin(this.phi) * Math.cos(this.theta),
+            freecamPos.y + this.radius * Math.cos(this.phi),
+            freecamPos.z + this.radius * Math.sin(this.phi) * Math.sin(this.theta)
         );
-        camera.lookAt(target);
+        camera.lookAt(freecamPos);
     }
 };
 
@@ -626,6 +658,11 @@ window.addEventListener('keydown', (e) => {
     }
 
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.key.toLowerCase() === 'w') keyState.w = true;
+    if (e.key.toLowerCase() === 'a') keyState.a = true;
+    if (e.key.toLowerCase() === 's') keyState.s = true;
+    if (e.key.toLowerCase() === 'd') keyState.d = true;
 
     if (e.key.toLowerCase() === KEYS.CONFIG.toLowerCase()) {
         const cfg = document.getElementById('config-ui');
@@ -647,6 +684,17 @@ window.addEventListener('keydown', (e) => {
         cl.style.display = (cl.style.display === 'none' || cl.style.display === '') ? 'block' : 'none';
     }
 
+    if (e.key.toLowerCase() === KEYS.FREECAM) {
+        freecamMode = !freecamMode;
+        if (freecamMode && selected) freecamPos.copy(selected.pos);
+    }
+
+    if (e.key.toLowerCase() === KEYS.DESELECT) {
+        selected = null;
+        uiPanel.style.display = 'none';
+        freecamMode = false;
+    }
+
     if (e.key === KEYS.DELETE) {
         deleteMode = !deleteMode;
         placementMode = false;
@@ -663,6 +711,13 @@ window.addEventListener('keydown', (e) => {
     if (e.key === KEYS.DELETE) { e.preventDefault(); deleteOutermostPlanet(); deleteMode = false; } 
     if (e.key === KEYS.TIME_UP) { e.preventDefault(); if (currentTimeStepIndex < timeSteps.length - 1) { currentTimeStepIndex++; updateTimeUI(); } }
     if (e.key === KEYS.TIME_DOWN) { e.preventDefault(); if (currentTimeStepIndex > 0) { currentTimeStepIndex--; updateTimeUI(); } }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() === 'w') keyState.w = false;
+    if (e.key.toLowerCase() === 'a') keyState.a = false;
+    if (e.key.toLowerCase() === 's') keyState.s = false;
+    if (e.key.toLowerCase() === 'd') keyState.d = false;
 });
 
 // Selection & Mouse
@@ -725,9 +780,6 @@ window.addEventListener('mousedown', (e) => {
         } else {
             document.getElementById('planet-only-stats').style.display = 'none';
         }
-    } else if (e.button === 0) {
-        uiPanel.style.display = 'none';
-        selected = null;
     }
 });
 
