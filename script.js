@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8-hotfix.b";
+const VERSION = "B.0.8.1";
 
 // --- NEW CONFIGS ---
 let SHOW_ATMOSPHERES = true;
@@ -43,6 +43,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.1", notes: ["Realistic Atmosphere Shader (Fresnel Glow)", "Fixed Raycast Selection (Grid/Orbit blocking)", "Fixed Cloud Rotation Speed", "Memory Cleanup on Delete"] },
     { ver: "B.0.8-hotfix.b", notes: ["Reverted to Procedural Planet Colors", "Added Procedural Cloud Generation", "Improved Atmosphere Shader (Cyan Glow)"] },
     { ver: "B.0.8-hotfix", notes: ["Fixed Texture 404s (Folder path)", "Fixed Ocean planet selection", "Added missing Sun properties", "Fixed Sun selection crash"] },
     { ver: "B.0.8.0", notes: ["Major UI Redesign", "Realistic Mass/Radius/Luminosity", "Planet Texturing", "Atmospheres & Clouds", "New Config Options (Orbits, FX)"] },
@@ -240,6 +241,23 @@ function initUI() {
 }
 initUI();
 
+// --- SHADERS ---
+const ATMOSPHERE_VERTEX_SHADER = `
+varying vec3 vNormal;
+void main() {
+    vNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const ATMOSPHERE_FRAGMENT_SHADER = `
+varying vec3 vNormal;
+void main() {
+    float intensity = pow(0.65 - dot(vNormal, vec3(0, 0, 1.0)), 4.0);
+    gl_FragColor = vec4(0.1, 0.9, 1.0, 1.0) * intensity * 1.5;
+}
+`;
+
 // --- NEW HELPERS ---
 function calculatePhysicalProperties(p) {
     if (p.isSun) {
@@ -355,7 +373,13 @@ function deleteOutermostPlanet() {
     if (targetIndex !== -1) {
         const p = planets[targetIndex];
         scene.remove(p.mesh);
+        // Clean up memory
+        p.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+        });
         scene.remove(p.orbitLine);
+        p.orbitLine.geometry.dispose();
         p.label.remove();
         planets.splice(targetIndex, 1);
         if (selected === p) {
@@ -492,8 +516,15 @@ function createPlanet(typeOverride = null) {
     // --- ATMOSPHERE & CLOUDS ---
     if (type === 'OCEAN') {
         if (SHOW_ATMOSPHERES) {
-            const atmGeo = new THREE.SphereGeometry(size * 1.15, 32, 32);
-            const atmMat = new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, side: THREE.FrontSide });
+            const atmGeo = new THREE.SphereGeometry(size * 1.2, 32, 32);
+            const atmMat = new THREE.ShaderMaterial({
+                vertexShader: ATMOSPHERE_VERTEX_SHADER,
+                fragmentShader: ATMOSPHERE_FRAGMENT_SHADER,
+                blending: THREE.AdditiveBlending,
+                side: THREE.FrontSide,
+                transparent: true,
+                depthWrite: false
+            });
             const atmMesh = new THREE.Mesh(atmGeo, atmMat);
             pData.mesh.add(atmMesh);
         }
@@ -572,11 +603,13 @@ window.addEventListener('mousedown', (e) => {
     const hits = raycaster.intersectObjects(scene.children, true); // Recursive to hit atmospheres/clouds
 
     let targetData = null;
-    if (hits.length > 0) {
-        // Check object or its parent (for clouds/atmosphere)
-        const obj = hits[0].object;
-        if (obj.userData.planetData) targetData = obj.userData.planetData;
-        else if (obj.parent && obj.parent.userData.planetData) targetData = obj.parent.userData.planetData;
+    for (let i = 0; i < hits.length; i++) {
+        const obj = hits[i].object;
+        // Ignore helpers and lines (Grid, Orbits) to prevent blocking
+        if (obj.type === 'GridHelper' || obj.type === 'Line') continue;
+
+        if (obj.userData.planetData) { targetData = obj.userData.planetData; break; }
+        else if (obj.parent && obj.parent.userData.planetData) { targetData = obj.parent.userData.planetData; break; }
     }
 
     if (targetData) {
@@ -693,7 +726,8 @@ function animate() {
 
         // Cloud rotation
         if (p.cloudMesh) {
-            p.cloudMesh.rotation.y += 0.0005 * timeMultiplier;
+            // Clamp rotation speed to avoid strobing at high time warps
+            p.cloudMesh.rotation.y += Math.min(0.02, 0.0005 * timeMultiplier);
         }
         
         // Always update selected, round-robin update others (3 per frame for smoothness)
