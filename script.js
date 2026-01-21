@@ -8,11 +8,12 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.1";
+const VERSION = "B.0.8.2";
 
 // --- NEW CONFIGS ---
 let SHOW_ATMOSPHERES = true;
 let SHOW_CLOUDS = true;
+let SHOW_STARS = true;
 let ORBIT_COLOR = '#ffffff';
 
 
@@ -23,7 +24,8 @@ const KEYS = {
     CONFIG: 'o',
     PLACEMENT: 'p',
     DELETE: 'Delete',
-    CHANGELOG: 'c'
+    CHANGELOG: 'c',
+    RESET: 'r'
 };
 
 const timeSteps = [1920, 3600, 14400, 43200, 86400, 259200, 604800, 1209600, 2592000, 7776000, 15552000, 31536000];
@@ -43,6 +45,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.2", notes: ["Camera Focus on Selected Planet", "Atmosphere/Cloud Altitude Sync", "Prevent Browser Zoom (Ctrl+/-)", "Starfield Background", "Config Pagination"] },
     { ver: "B.0.8.1", notes: ["Realistic Atmosphere Shader (Fresnel Glow)", "Fixed Raycast Selection (Grid/Orbit blocking)", "Fixed Cloud Rotation Speed", "Memory Cleanup on Delete"] },
     { ver: "B.0.8-hotfix.b", notes: ["Reverted to Procedural Planet Colors", "Added Procedural Cloud Generation", "Improved Atmosphere Shader (Cyan Glow)"] },
     { ver: "B.0.8-hotfix", notes: ["Fixed Texture 404s (Folder path)", "Fixed Ocean planet selection", "Added missing Sun properties", "Fixed Sun selection crash"] },
@@ -87,6 +90,13 @@ sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh:
 scene.add(sun);
 calculatePhysicalProperties(sun.userData.planetData); // Calculate sun's properties
 
+// --- STARFIELD ---
+const starGeo = new THREE.BufferGeometry();
+const starPos = [];
+for(let i=0; i<6000; i++) starPos.push(THREE.MathUtils.randFloatSpread(10000), THREE.MathUtils.randFloatSpread(10000), THREE.MathUtils.randFloatSpread(10000));
+starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0xffffff, size: 1.5}));
+scene.add(stars);
 
 // --- GRID HELPER ---
 const gridHelper = new THREE.GridHelper(10000, 50, 0xffffff, 0xffffff);
@@ -105,6 +115,31 @@ function initUI() {
     hint.innerHTML += '<br>[C] CHANGELOG';
     ui.appendChild(hint);
 
+    // Config Data Definitions
+    const genConfigs = [
+        { label: "GRAVITY_CONST (G)", type: "number", id: "cfg-g", value: G },
+        { label: "SUN_MASS", type: "number", id: "cfg-mass", value: SUN_MASS },
+        { label: "MAX_PLANETS", type: "number", id: "cfg-max", value: MAX_PLANETS },
+        { label: "DESPAWN_DIST", type: "number", id: "cfg-despawn", value: DESPAWN_DISTANCE },
+        { label: "SHOW_GRID", type: "checkbox", id: "cfg-grid-show", checked: true },
+        { label: "SHOW_ATMOSPHERES", type: "checkbox", id: "cfg-fx-atmos", checked: SHOW_ATMOSPHERES },
+        { label: "SHOW_CLOUDS", type: "checkbox", id: "cfg-fx-clouds", checked: SHOW_CLOUDS },
+        { label: "SHOW_STARS", type: "checkbox", id: "cfg-fx-stars", checked: SHOW_STARS },
+        { label: "GRID_COLOR", type: "color", id: "cfg-grid-col", value: "#ffffff" },
+        { label: "ORBIT_COLOR", type: "color", id: "cfg-orbit-col", value: ORBIT_COLOR }
+    ];
+
+    const keyConfigs = [
+        { label: "SPAWN (Ctrl+)", action: "SPAWN" },
+        { label: "TIME UP (Ctrl+)", action: "TIME_UP" },
+        { label: "TIME DOWN (Ctrl+)", action: "TIME_DOWN" },
+        { label: "DELETE (Ctrl+)", action: "DELETE" },
+        { label: "CONFIG MENU", action: "CONFIG" },
+        { label: "PLACEMENT MENU", action: "PLACEMENT" },
+        { label: "CHANGELOG", action: "CHANGELOG" },
+        { label: "RESET", action: "RESET" }
+    ];
+
     // Create Config Modal
     const configDiv = document.createElement('div');
     configDiv.id = 'config-ui';
@@ -114,24 +149,13 @@ function initUI() {
             <button class="tab-btn" id="tab-btn-keybinds">KEYBINDS</button>
         </div>
         
-        <div id="tab-general" class="tab-content active">
-            <div class="config-row"><span>GRAVITY_CONST (G)</span><input type="number" id="cfg-g" value="${G}"></div>
-            <div class="config-row"><span>SUN_MASS</span><input type="number" id="cfg-mass" value="${SUN_MASS}"></div>
-            <div class="config-row"><span>MAX_PLANETS</span><input type="number" id="cfg-max" value="${MAX_PLANETS}"></div>
-            <div class="config-row"><span>DESPAWN_DIST</span><input type="number" id="cfg-despawn" value="${DESPAWN_DISTANCE}"></div>
-            <div class="config-row"><span>SHOW_GRID</span><input type="checkbox" id="cfg-grid-show" checked></div>
-            <div class="config-row"><span>SHOW_ATMOSPHERES</span><input type="checkbox" id="cfg-fx-atmos" checked></div>
-            <div class="config-row"><span>SHOW_CLOUDS</span><input type="checkbox" id="cfg-fx-clouds" checked></div>
-            <div class="config-row"><span>GRID_COLOR</span><input type="color" id="cfg-grid-col" value="#ffffff"></div>
-            <div class="config-row"><span>ORBIT_COLOR</span><input type="color" id="cfg-orbit-col" value="${ORBIT_COLOR}"></div>
-        </div>
+        <div id="tab-general" class="tab-content active"></div>
+        <div id="tab-keybinds" class="tab-content"></div>
 
-        <div id="tab-keybinds" class="tab-content">
-            <div class="config-row"><span>SPAWN (Ctrl+)</span><button class="bind-btn" data-action="SPAWN">${KEYS.SPAWN}</button></div>
-            <div class="config-row"><span>TIME UP (Ctrl+)</span><button class="bind-btn" data-action="TIME_UP">${KEYS.TIME_UP}</button></div>
-            <div class="config-row"><span>TIME DOWN (Ctrl+)</span><button class="bind-btn" data-action="TIME_DOWN">${KEYS.TIME_DOWN}</button></div>
-            <div class="config-row"><span>CONFIG MENU</span><button class="bind-btn" data-action="CONFIG">${KEYS.CONFIG}</button></div>
-            <div class="config-row"><span>PLACEMENT MENU</span><button class="bind-btn" data-action="PLACEMENT">${KEYS.PLACEMENT}</button></div>
+        <div class="pagination-controls">
+            <button id="prev-page" class="page-btn"><</button>
+            <span id="page-indicator">1/1</span>
+            <button id="next-page" class="page-btn">></button>
         </div>
 
         <div style="text-align:center; margin-top:20px;">
@@ -184,17 +208,102 @@ function initUI() {
     btns.general.onclick = () => switchTab('general');
     btns.keybinds.onclick = () => switchTab('keybinds');
 
+    // Pagination Logic
+    let curGenPage = 0;
+    let curKeyPage = 0;
+    let activeTab = 'general';
+
+    function renderConfig() {
+        const renderItems = (items, page, containerId, isKey) => {
+            const start = page * 5;
+            const slice = items.slice(start, start + 5);
+            let html = '';
+            slice.forEach(item => {
+                if (isKey) {
+                    html += `<div class="config-row"><span>${item.label}</span><button class="bind-btn" data-action="${item.action}">${KEYS[item.action]}</button></div>`;
+                } else {
+                    let input = `<input type="number" id="${item.id}" value="${item.value}">`;
+                    if (item.type === 'checkbox') input = `<input type="checkbox" id="${item.id}" ${item.checked ? 'checked' : ''}>`;
+                    else if (item.type === 'color') input = `<input type="color" id="${item.id}" value="${item.value}">`;
+                    html += `<div class="config-row"><span>${item.label}</span>${input}</div>`;
+                }
+            });
+            document.getElementById(containerId).innerHTML = html;
+        };
+
+        renderItems(genConfigs, curGenPage, 'tab-general', false);
+        renderItems(keyConfigs, curKeyPage, 'tab-keybinds', true);
+
+        const total = activeTab === 'general' ? Math.ceil(genConfigs.length/5) : Math.ceil(keyConfigs.length/5);
+        const current = activeTab === 'general' ? curGenPage : curKeyPage;
+        document.getElementById('page-indicator').textContent = `${current + 1}/${total}`;
+        
+        // Re-attach keybind listeners
+        document.querySelectorAll('.bind-btn').forEach(btn => {
+            btn.onclick = () => {
+                btn.textContent = "...";
+                const action = btn.dataset.action;
+                const handler = (e) => {
+                    KEYS[action] = e.key;
+                    btn.textContent = e.key.toUpperCase();
+                    window.removeEventListener('keydown', handler, true);
+                    e.stopPropagation(); e.preventDefault();
+                };
+                window.addEventListener('keydown', handler, { capture: true, once: true });
+            };
+        });
+    }
+    
+    // Hook into tab switching to update pagination state
+    btns.general.addEventListener('click', () => { activeTab = 'general'; renderConfig(); });
+    btns.keybinds.addEventListener('click', () => { activeTab = 'keybinds'; renderConfig(); });
+    
+    document.getElementById('prev-page').onclick = () => {
+        if (activeTab === 'general' && curGenPage > 0) curGenPage--;
+        if (activeTab === 'keybinds' && curKeyPage > 0) curKeyPage--;
+        renderConfig();
+    };
+    document.getElementById('next-page').onclick = () => {
+        if (activeTab === 'general' && curGenPage < Math.ceil(genConfigs.length/5)-1) curGenPage++;
+        if (activeTab === 'keybinds' && curKeyPage < Math.ceil(keyConfigs.length/5)-1) curKeyPage++;
+        renderConfig();
+    };
+    
+    // Initial Render
+    renderConfig();
+
     // Config Logic
     document.getElementById('cfg-close').onclick = () => {
-        G = parseFloat(document.getElementById('cfg-g').value);
-        SUN_MASS = parseFloat(document.getElementById('cfg-mass').value);
-        MAX_PLANETS = parseInt(document.getElementById('cfg-max').value);
-        DESPAWN_DISTANCE = parseFloat(document.getElementById('cfg-despawn').value);
-        gridHelper.visible = document.getElementById('cfg-grid-show').checked;
-        SHOW_ATMOSPHERES = document.getElementById('cfg-fx-atmos').checked;
-        SHOW_CLOUDS = document.getElementById('cfg-fx-clouds').checked;
-        gridHelper.material.color.set(document.getElementById('cfg-grid-col').value);
-        ORBIT_COLOR = document.getElementById('cfg-orbit-col').value;
+        // Update values from inputs (if they exist in DOM, otherwise they keep old values)
+        // Note: Only visible inputs can be read directly. For a robust system, we'd bind inputs to the array.
+        // For now, we assume user sets what they see.
+        const getVal = (id, type) => {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            return type === 'checkbox' ? el.checked : (type === 'number' ? parseFloat(el.value) : el.value);
+        };
+
+        // We iterate config arrays to save state back
+        genConfigs.forEach(c => {
+            const val = getVal(c.id, c.type);
+            if (val !== null) c.value = c.checked = val; // Update internal state
+        });
+
+        // Apply to Globals
+        const find = (id) => { const f = genConfigs.find(c => c.id === id); return f.type === 'checkbox' ? f.checked : f.value; };
+        
+        G = find('cfg-g');
+        SUN_MASS = find('cfg-mass');
+        MAX_PLANETS = find('cfg-max');
+        DESPAWN_DISTANCE = find('cfg-despawn');
+        gridHelper.visible = find('cfg-grid-show');
+        SHOW_ATMOSPHERES = find('cfg-fx-atmos');
+        SHOW_CLOUDS = find('cfg-fx-clouds');
+        SHOW_STARS = find('cfg-fx-stars');
+        gridHelper.material.color.set(find('cfg-grid-col'));
+        ORBIT_COLOR = find('cfg-orbit-col');
+
+        stars.visible = SHOW_STARS;
 
         // Update existing orbits and sun properties
         planets.forEach(p => p.orbitLine.material.color.set(ORBIT_COLOR));
@@ -203,21 +312,6 @@ function initUI() {
         updateTimeUI(); // Recalculate physics ratio if G/Mass changed
         document.getElementById('config-ui').style.display = 'none';
     };
-
-    // Keybind Logic
-    document.querySelectorAll('.bind-btn').forEach(btn => {
-        btn.onclick = () => {
-            btn.textContent = "...";
-            const action = btn.dataset.action;
-            const handler = (e) => {
-                KEYS[action] = e.key;
-                btn.textContent = e.key.toUpperCase();
-                window.removeEventListener('keydown', handler, true);
-                e.stopPropagation(); e.preventDefault();
-            };
-            window.addEventListener('keydown', handler, { capture: true, once: true });
-        };
-    });
 
     // Create Extra Stats Container in Planet UI
     extraStatsContainer = document.createElement('div');
@@ -330,7 +424,6 @@ function createLabel(text) {
     labelsContainer.appendChild(div);
     return div;
 }
-
 function getSimToRealRatio() {
     // Calculate period of 1 AU orbit in simulation seconds
     const simPeriod = 2 * Math.PI * Math.sqrt(Math.pow(AU_SIZE, 3) / (G * SUN_MASS));
@@ -516,7 +609,7 @@ function createPlanet(typeOverride = null) {
     // --- ATMOSPHERE & CLOUDS ---
     if (type === 'OCEAN') {
         if (SHOW_ATMOSPHERES) {
-            const atmGeo = new THREE.SphereGeometry(size * 1.2, 32, 32);
+            const atmGeo = new THREE.SphereGeometry(size * 1.04, 32, 32); // Lowered to match clouds
             const atmMat = new THREE.ShaderMaterial({
                 vertexShader: ATMOSPHERE_VERTEX_SHADER,
                 fragmentShader: ATMOSPHERE_FRAGMENT_SHADER,
@@ -553,12 +646,13 @@ const CameraManager = {
     isRightClick: false,
     
     update: function() {
+        const target = selected ? selected.pos : new THREE.Vector3(0,0,0);
         camera.position.set(
-            this.radius * Math.sin(this.phi) * Math.cos(this.theta),
-            this.radius * Math.cos(this.phi),
-            this.radius * Math.sin(this.phi) * Math.sin(this.theta)
+            target.x + this.radius * Math.sin(this.phi) * Math.cos(this.theta),
+            target.y + this.radius * Math.cos(this.phi),
+            target.z + this.radius * Math.sin(this.phi) * Math.sin(this.theta)
         );
-        camera.lookAt(0, 0, 0);
+        camera.lookAt(target);
     }
 };
 
@@ -568,6 +662,11 @@ window.addEventListener('wheel', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
+    // Prevent browser zoom (Ctrl + / -)
+    if (e.ctrlKey && (e.key === '=' || e.key === '-' || e.key === '+' || e.key === '_')) {
+        e.preventDefault();
+    }
+
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     if (e.key.toLowerCase() === KEYS.CONFIG.toLowerCase()) {

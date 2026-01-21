@@ -97,6 +97,16 @@ button:hover {
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
+.pagination-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    margin-top: 15px;
+    color: #0f0;
+}
+.page-btn { width: 30px; padding: 5px; }
+
 /* Placement UI */
 #placement-ui {
     display: none;
