@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8-hotfix";
+const VERSION = "B.0.8-hotfix.b";
 
 // --- NEW CONFIGS ---
 let SHOW_ATMOSPHERES = true;
@@ -43,6 +43,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8-hotfix.b", notes: ["Reverted to Procedural Planet Colors", "Added Procedural Cloud Generation", "Improved Atmosphere Shader (Cyan Glow)"] },
     { ver: "B.0.8-hotfix", notes: ["Fixed Texture 404s (Folder path)", "Fixed Ocean planet selection", "Added missing Sun properties", "Fixed Sun selection crash"] },
     { ver: "B.0.8.0", notes: ["Major UI Redesign", "Realistic Mass/Radius/Luminosity", "Planet Texturing", "Atmospheres & Clouds", "New Config Options (Orbits, FX)"] },
     { ver: "B.0.7.8", notes: ["Realistic Time Warp (32m/s to 1y/s)", "Fixed Distance Display (AU scaling)", "Dynamic Physics Calibration"] },
@@ -91,9 +92,6 @@ const gridHelper = new THREE.GridHelper(10000, 50, 0xffffff, 0xffffff);
 gridHelper.material.transparent = true;
 gridHelper.material.opacity = 0.15;
 scene.add(gridHelper);
-
-// --- TEXTURE LOADER ---
-const textureLoader = new THREE.TextureLoader();
 
 // --- UI INITIALIZATION ---
 function initUI() {
@@ -278,12 +276,32 @@ function formatRelativeTo(value, baseValue, name) {
     return `${(value / baseValue).toFixed(3)} ${name}`;
 }
 
-function getTexturePath(type) {
-    let filename = '';
-    if (type === 'GAS') filename = 'Gasgiant.png';
-    else if (type === 'OCEAN') filename = 'Ocean.png';
-    else filename = 'Rocky.png';
-    return `./terrainmap/${filename}`;
+function createProceduralCloudTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    
+    // Transparent background
+    ctx.clearRect(0, 0, 512, 256);
+    
+    // Draw random cloud puffs
+    for (let i = 0; i < 150; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 256;
+        const r = Math.random() * 30 + 10;
+        
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
+    
+    return new THREE.CanvasTexture(canvas);
 }
 
 // --- HELPERS ---
@@ -461,8 +479,7 @@ function createPlanet(typeOverride = null) {
     // --- MATERIAL & TEXTURING ---
     const material = new THREE.MeshStandardMaterial({
         color: color,
-        roughness: 0.8,
-        map: textureLoader.load(getTexturePath(type))
+        roughness: 0.8
     });
 
     const pData = {
@@ -475,15 +492,15 @@ function createPlanet(typeOverride = null) {
     // --- ATMOSPHERE & CLOUDS ---
     if (type === 'OCEAN') {
         if (SHOW_ATMOSPHERES) {
-            const atmGeo = new THREE.SphereGeometry(size * 1.05, 32, 32);
-            const atmMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.3 });
+            const atmGeo = new THREE.SphereGeometry(size * 1.15, 32, 32);
+            const atmMat = new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, side: THREE.FrontSide });
             const atmMesh = new THREE.Mesh(atmGeo, atmMat);
             pData.mesh.add(atmMesh);
         }
         if (SHOW_CLOUDS) {
-            const cloudGeo = new THREE.SphereGeometry(size * 1.02, 32, 32);
-            const cloudMap = textureLoader.load('./terrainmaps/clouds.png');
-            const cloudMat = new THREE.MeshStandardMaterial({ map: cloudMap, transparent: true, alphaMap: cloudMap, opacity: 0.7 });
+            const cloudGeo = new THREE.SphereGeometry(size * 1.03, 32, 32);
+            const cloudMap = createProceduralCloudTexture();
+            const cloudMat = new THREE.MeshStandardMaterial({ map: cloudMap, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
             pData.cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
             pData.mesh.add(pData.cloudMesh);
         }
