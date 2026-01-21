@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.0";
+const VERSION = "B.0.8-hotfix";
 
 // --- NEW CONFIGS ---
 let SHOW_ATMOSPHERES = true;
@@ -43,6 +43,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8-hotfix", notes: ["Fixed Texture 404s (Folder path)", "Fixed Ocean planet selection", "Added missing Sun properties", "Fixed Sun selection crash"] },
     { ver: "B.0.8.0", notes: ["Major UI Redesign", "Realistic Mass/Radius/Luminosity", "Planet Texturing", "Atmospheres & Clouds", "New Config Options (Orbits, FX)"] },
     { ver: "B.0.7.8", notes: ["Realistic Time Warp (32m/s to 1y/s)", "Fixed Distance Display (AU scaling)", "Dynamic Physics Calibration"] },
     { ver: "B.0.7.7-hotfix", notes: ["Fixed invisible orbits bug (Variable collision)", "Patched circular orbit math"] },
@@ -80,7 +81,7 @@ scene.add(new THREE.AmbientLight(0x404040, 2.5));
 
 const sun = new THREE.Mesh(new THREE.SphereGeometry(22, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
 const sunLabel = createLabel("THE_SUN");
-sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun, size: 22 };
+sun.userData.planetData = { name: "THE_SUN", isSun: true, label: sunLabel, mesh: sun, size: 22, pos: new THREE.Vector3(0,0,0), vel: new THREE.Vector3(0,0,0), type: "STAR" };
 scene.add(sun);
 calculatePhysicalProperties(sun.userData.planetData); // Calculate sun's properties
 
@@ -282,7 +283,7 @@ function getTexturePath(type) {
     if (type === 'GAS') filename = 'Gasgiant.png';
     else if (type === 'OCEAN') filename = 'Ocean.png';
     else filename = 'Rocky.png';
-    return `./terrainmaps/${filename}`;
+    return `./terrainmap/${filename}`;
 }
 
 // --- HELPERS ---
@@ -551,10 +552,18 @@ window.addEventListener('mousedown', (e) => {
     const mouse = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObjects(scene.children);
+    const hits = raycaster.intersectObjects(scene.children, true); // Recursive to hit atmospheres/clouds
 
-    if (hits.length > 0 && hits[0].object.userData.planetData) {
-        selected = hits[0].object.userData.planetData;
+    let targetData = null;
+    if (hits.length > 0) {
+        // Check object or its parent (for clouds/atmosphere)
+        const obj = hits[0].object;
+        if (obj.userData.planetData) targetData = obj.userData.planetData;
+        else if (obj.parent && obj.parent.userData.planetData) targetData = obj.parent.userData.planetData;
+    }
+
+    if (targetData) {
+        selected = targetData;
         uiPanel.style.display = 'block';
         nameInput.value = selected.name;
         colorPicker.value = "#" + selected.mesh.material.color.getHexString();
