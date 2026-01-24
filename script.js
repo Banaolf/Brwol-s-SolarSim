@@ -8,7 +8,7 @@ let MAX_PLANETS = 12;
 const SUB_STEPS = 100; // High sub-stepping for maximum stability
 let CRASH_DISTANCE = 18; 
 let DESPAWN_DISTANCE = 5000;
-const VERSION = "B.0.8.4-B.Hotfix";
+const VERSION = "B.0.8.5";
 
 // --- NEW CONFIGS ---
 let SHOW_STARS = true;
@@ -20,6 +20,7 @@ const KEYS = {
     TIME_UP: '+',
     TIME_DOWN: '-',
     CONFIG: 'o', 
+    CONTROLS: 'k',
     FREECAM: 'f',
     DESELECT: 'z',
     DELETE: 'Delete',
@@ -52,6 +53,7 @@ const DENSITY_GAS_KGM3 = 1326;
 const STEFAN_BOLTZMANN = 5.67e-8;
 
 const CHANGELOG_DATA = [
+    { ver: "B.0.8.5", notes: ["Smart Parent Detection (Moons orbit planets automatically)", "Orbit Preview in Placement Mode", "Controls Menu [K]", "Polished Orbit Stability"] },
     { ver: "B.0.8.4-B.Hotfix", notes: ["Fixed Critical Keybind Crash (Missing Placement Key definition)", "Implemented Reset Key (R)"] },
     { ver: "B.0.8.4", notes: ["Polished Orbits (Reduced Wobble)", "Realistic Size/Mass Scaling", "Ghost Placement Tool (P)", "Delete Tool Toggle (Del)", "New Planet Presets"] },
     { ver: "B.0.8.3", notes: ["N-Body Physics (Planets have gravity)", "Removed Planet Types (Generic Bodies)", "Realistic Mass Scaling", "Crash Course Orbit Visualization", "UI Cleanup"] },
@@ -130,15 +132,19 @@ ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
 ghostMesh.visible = false;
 scene.add(ghostMesh);
 
+// --- GHOST ORBIT LINE ---
+const ghostOrbitMat = new THREE.LineBasicMaterial({ color: 0x00f2ff, transparent: true, opacity: 0.5 });
+const ghostOrbitLine = new THREE.Line(new THREE.BufferGeometry(), ghostOrbitMat);
+scene.add(ghostOrbitLine);
+ghostOrbitLine.visible = false;
+
 // --- UI INITIALIZATION ---
 function initUI() {
     // Add Config Hint to Main UI
     const ui = document.getElementById('ui');
     const hint = document.createElement('div');
     hint.className = 'key-hint';
-    hint.innerHTML = '<br>[P] PLACEMENT | [F] FREECAM | [Z] UNSELECT';
-    hint.innerHTML = '<br>[O] CONFIGURATION TAB';
-    hint.innerHTML += '<br>[C] CHANGELOG';
+    hint.innerHTML = '[K] CONTROLS';
     ui.appendChild(hint);
 
     // Config Data Definitions
@@ -209,6 +215,21 @@ function initUI() {
             </div>`;
     });
     document.body.appendChild(logDiv);
+
+    // Create Controls UI
+    const ctrlDiv = document.createElement('div');
+    ctrlDiv.id = 'controls-ui';
+    ctrlDiv.innerHTML = `<h2 style="text-align:center; margin-top:0; color:#00f2ff;">CONTROLS</h2>`;
+    const keyList = [
+        { k: "Left Click", d: "Select Planet" }, { k: "Right Click + Drag", d: "Rotate Camera" }, { k: "Scroll", d: "Zoom" },
+        { k: KEYS.CONTROLS.toUpperCase(), d: "Controls Menu" }, { k: KEYS.PLACEMENT.toUpperCase(), d: "Placement Tool" },
+        { k: KEYS.CONFIG.toUpperCase(), d: "Configuration" }, { k: KEYS.CHANGELOG.toUpperCase(), d: "Changelog" },
+        { k: KEYS.FREECAM.toUpperCase(), d: "Toggle Freecam (WASD)" }, { k: KEYS.DESELECT.toUpperCase(), d: "Deselect / Reset View" },
+        { k: KEYS.SPAWN, d: "Quick Spawn (Random)" }, { k: KEYS.DELETE, d: "Delete Tool" }, { k: KEYS.RESET.toUpperCase(), d: "Reset Simulation" },
+        { k: "+ / -", d: "Time Warp Control" }
+    ];
+    keyList.forEach(item => ctrlDiv.innerHTML += `<div class="key-row"><span class="key-action">${item.d}</span><span class="key-bind">${item.k}</span></div>`);
+    document.body.appendChild(ctrlDiv);
 
     // --- EVENT LISTENERS FOR UI ---
     
@@ -359,6 +380,7 @@ function selectPreset(preset) {
     // Update ghost size based on preset radius (Visual Scale: 1 Earth Radius = 1 Unit)
     const visualSize = Math.max(0.5, preset.radius * 1.5); 
     ghostMesh.scale.set(visualSize, visualSize, visualSize);
+    ghostOrbitLine.visible = true;
     ghostMesh.visible = true;
 }
 
@@ -459,87 +481,94 @@ function deleteOutermostPlanet() {
     }
 }
 
+function findDominantBody(pos, excludeBody = null) {
+    let bestBody = sun.userData.planetData;
+    let maxAcc = (G * SUN_MASS) / pos.distanceToSquared(sun.position);
+    
+    planets.forEach(p => {
+        if (p === excludeBody) return;
+        const d2 = pos.distanceToSquared(p.pos);
+        const acc = (G * p.mass) / d2;
+        if (acc > maxAcc) { maxAcc = acc; bestBody = p; }
+    });
+    return bestBody;
+}
+
 // Polished Orbit: Uses semi-major axis for accurate period calculation
-function updateOrbitLine(p) {
-    const rVec = p.pos.clone();
-    const vVec = p.vel.clone();
-    const mu = G * SUN_MASS;
+function getOrbitPoints(centerBody, orbitingPos, orbitingVel) {
+    const rVec = orbitingPos.clone().sub(centerBody.pos);
+    const vVec = orbitingVel.clone().sub(centerBody.vel);
+    const mu = G * centerBody.mass;
     
     // Orbital Elements (Keplerian)
     const h = new THREE.Vector3().crossVectors(rVec, vVec); // Angular momentum
     const eVec = new THREE.Vector3().crossVectors(vVec, h).divideScalar(mu).sub(rVec.clone().normalize()); // Eccentricity vector
     const e = eVec.length();
-    let apsidesInfo = { tPe: 0, tAp: 0, period: 0 };
     
     const points = [];
+    let apsides = null;
 
     if (e < 0.99) {
-        // Elliptical Orbit (Analytical Solution)
         const specificEnergy = vVec.lengthSq() / 2 - mu / rVec.length();
-        const a = -mu / (2 * specificEnergy); // Semi-major axis
-        const p_param = a * (1 - e * e); // Semi-latus rectum
+        const a = -mu / (2 * specificEnergy);
+        const p_param = a * (1 - e * e);
         const period = 2 * Math.PI * Math.sqrt(Math.pow(a, 3) / mu);
 
-        // Time to Apsides Calculation
+        // Apsides Calculation
         const r = rVec.length();
         const dot = rVec.dot(vVec);
         const nu = (e > 1e-4) ? Math.acos(Math.max(-1, Math.min(1, eVec.dot(rVec) / (e * r)))) : 0;
         const trueAnomaly = (dot >= 0) ? nu : (2 * Math.PI - nu);
-        
         const E = 2 * Math.atan(Math.sqrt((1-e)/(1+e)) * Math.tan(trueAnomaly/2));
-        const M = E - e * Math.sin(E); // Mean Anomaly
-        const n = Math.sqrt(mu / Math.pow(a, 3)); // Mean Motion
+        const M = E - e * Math.sin(E);
+        const n = Math.sqrt(mu / Math.pow(a, 3));
         const tSincePe = M / n;
-        
-        apsidesInfo = { tPe: period - tSincePe, tAp: (period * 1.5 - tSincePe) % period, period: period };
-        
+        apsides = { tPe: period - tSincePe, tAp: (period * 1.5 - tSincePe) % period, period: period };
+
         // Basis Vectors
-        const orbitNormal = new THREE.Vector3().copy(h).normalize(); // Orbit Normal
-        let u = new THREE.Vector3(); // Periapsis direction
-        if (e > 0.01) {
-            u.copy(eVec).normalize();
-        } else {
-            u.copy(rVec).normalize(); // Circular fallback
-        }
+        const orbitNormal = new THREE.Vector3().copy(h).normalize();
+        let u = new THREE.Vector3();
+        if (e > 0.01) u.copy(eVec).normalize();
+        else u.copy(rVec).normalize();
         const w = new THREE.Vector3().crossVectors(orbitNormal, u);
         
         const segments = 128;
         for (let i = 0; i <= segments; i++) {
             const theta = (i / segments) * 2 * Math.PI;
             const rDist = p_param / (1 + e * Math.cos(theta));
-            
-            // Crash Course Check: If point is inside Sun, stop drawing
             if (rDist < CRASH_DISTANCE) continue;
-            
             const pt = new THREE.Vector3()
                 .addScaledVector(u, rDist * Math.cos(theta))
-                .addScaledVector(w, rDist * Math.sin(theta));
-            if (pt.length() < CRASH_DISTANCE) continue;
+                .addScaledVector(w, rDist * Math.sin(theta))
+                .add(centerBody.pos); // Convert back to world space
             points.push(pt);
         }
     } else {
-        // Hyperbolic/Parabolic (Escape Trajectory) - Use numerical prediction
+        // Hyperbolic
         let tempPos = rVec.clone();
         let tempVel = vVec.clone();
         const simStep = 1; 
-        
         for (let i = 0; i < 300; i++) {
             const r2 = tempPos.lengthSq();
             if (r2 < CRASH_DISTANCE * CRASH_DISTANCE) break;
-            
             const dist = Math.sqrt(r2);
             const accFactor = -mu / (r2 * dist);
-            
             tempVel.addScaledVector(tempPos, accFactor * simStep);
             tempPos.addScaledVector(tempVel, simStep);
-            points.push(tempPos.clone());
+            points.push(tempPos.clone().add(centerBody.pos));
             if (tempPos.length() > DESPAWN_DISTANCE) break;
         }
     }
+    return { points, apsides };
+}
+
+function updateOrbitLine(p) {
+    const parent = findDominantBody(p.pos, p);
+    const data = getOrbitPoints(parent, p.pos, p.vel);
     
     p.orbitLine.geometry.dispose();
-    p.orbitLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
-    p.orbitalData = apsidesInfo;
+    p.orbitLine.geometry = new THREE.BufferGeometry().setFromPoints(data.points);
+    p.orbitalData = data.apsides;
 }
 
 function createPlanet(posOverride = null, preset = null) {
@@ -553,21 +582,14 @@ function createPlanet(posOverride = null, preset = null) {
         realRadius = preset.radius * EARTH_RADIUS_KM;
         size = Math.max(0.5, preset.radius * 1.5); // Visual scale
 
-        // Moon Logic: If a planet is selected, orbit it. Otherwise orbit Sun.
-        if (selected && !selected.isSun) {
-            const distVec = new THREE.Vector3().subVectors(pos, selected.pos);
-            const r = distVec.length();
-            const vOrb = Math.sqrt((G * selected.mass) / r);
-            // Tangent direction relative to parent
-            const orbitDir = new THREE.Vector3().crossVectors(distVec, new THREE.Vector3(0, 1, 0)).normalize();
-            vel = selected.vel.clone().add(orbitDir.multiplyScalar(vOrb));
-        } else {
-            // Sun Orbit (Corrected for any position)
-            const r = pos.length();
-            const vOrb = Math.sqrt((G * SUN_MASS) / r);
-            const orbitDir = new THREE.Vector3().crossVectors(pos, new THREE.Vector3(0, 1, 0)).normalize();
-            vel = orbitDir.multiplyScalar(vOrb);
-        }
+        // Smart Parent Detection
+        const parent = findDominantBody(pos);
+        const distVec = new THREE.Vector3().subVectors(pos, parent.pos);
+        const r = distVec.length();
+        const vOrb = Math.sqrt((G * parent.mass) / r);
+        // Tangent direction relative to parent
+        const orbitDir = new THREE.Vector3().crossVectors(distVec, new THREE.Vector3(0, 1, 0)).normalize();
+        vel = parent.vel.clone().add(orbitDir.multiplyScalar(vOrb));
     } else {
         // Random Generation
         const lastDist = planets.length > 0 ? planets[planets.length-1].pos.length() : 180;
@@ -671,12 +693,18 @@ window.addEventListener('keydown', (e) => {
         cfg.style.display = (cfg.style.display === 'none' || cfg.style.display === '') ? 'block' : 'none';
     }
 
+    if (e.key.toLowerCase() === KEYS.CONTROLS) {
+        const el = document.getElementById('controls-ui');
+        el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'block' : 'none';
+    }
+
     if (e.key.toLowerCase() === KEYS.PLACEMENT.toLowerCase()) {
         const bar = document.getElementById('placement-bar');
         bar.style.display = (bar.style.display === 'none' || bar.style.display === '') ? 'flex' : 'none';
         if (bar.style.display === 'none') {
             placementMode = false;
             ghostMesh.visible = false;
+            ghostOrbitLine.visible = false;
             document.body.style.cursor = 'default';
         }
     }
@@ -715,6 +743,7 @@ window.addEventListener('keydown', (e) => {
         deleteMode = !deleteMode;
         placementMode = false;
         ghostMesh.visible = false;
+        ghostOrbitLine.visible = false;
         document.body.style.cursor = deleteMode ? 'not-allowed' : 'default';
         // Visual feedback
         const hint = document.querySelector('.key-hint');
@@ -753,6 +782,7 @@ window.addEventListener('mousedown', (e) => {
             createPlanet(target, selectedPreset);
             placementMode = false;
             ghostMesh.visible = false;
+            ghostOrbitLine.visible = false;
             document.body.style.cursor = 'default';
             return;
         }
@@ -836,7 +866,20 @@ function animate() {
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const target = new THREE.Vector3();
         raycaster.ray.intersectPlane(plane, target);
-        if (target) ghostMesh.position.copy(target);
+        if (target) {
+            ghostMesh.position.copy(target);
+            
+            // Ghost Orbit Preview
+            const parent = findDominantBody(target);
+            const distVec = new THREE.Vector3().subVectors(target, parent.pos);
+            const vOrb = Math.sqrt((G * parent.mass) / distVec.length());
+            const orbitDir = new THREE.Vector3().crossVectors(distVec, new THREE.Vector3(0, 1, 0)).normalize();
+            const vel = parent.vel.clone().add(orbitDir.multiplyScalar(vOrb));
+            
+            const data = getOrbitPoints(parent, target, vel);
+            ghostOrbitLine.geometry.dispose();
+            ghostOrbitLine.geometry = new THREE.BufferGeometry().setFromPoints(data.points);
+        }
     }
 
     for (let s = 0; s < SUB_STEPS; s++) {

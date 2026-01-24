@@ -145,6 +145,26 @@ button:hover {
     box-shadow: 0 0 30px rgba(0, 242, 255, 0.3);
 }
 
+/* Controls UI */
+#controls-ui {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 15, 20, 0.95);
+    border: 1px solid rgba(0, 242, 255, 0.7);
+    color: white;
+    padding: 25px;
+    min-width: 300px;
+    z-index: 3000;
+    box-shadow: 0 0 30px rgba(0, 242, 255, 0.3);
+    font-family: inherit;
+}
+.key-row { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); padding: 8px 0; }
+.key-action { color: #aaa; }
+.key-bind { color: #00f2ff; font-weight: bold; }
+
 /* Inputs & Scrollbars Polish */
 input {
     background: rgba(0, 0, 0, 0.5);
